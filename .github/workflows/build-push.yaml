@@ -19,14 +19,16 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - id: 'auth'
-      name: 'Authenticate to Google Cloud'
-      uses: 'google-github-actions/auth@v3'
-      with:
-        credentials_json: ${{ secrets.GCP_CREDENTIALS }}
-
     - name: 'Set up Cloud SDK'
       uses: 'google-github-actions/setup-gcloud@v3'
+
+    - name: 'Authenticate to Google Cloud (gcloud)'
+      env:
+        GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+      run: |
+        echo "$GCP_CREDENTIALS" > gcp-key.json
+        gcloud auth activate-service-account --key-file=gcp-key.json
+        rm gcp-key.json
 
     - name: 'Configure Docker'
       run: |
