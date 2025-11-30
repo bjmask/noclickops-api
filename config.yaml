@@ -1,0 +1,8 @@
+# Example local config for noclickops-api
+database_url: "postgres://postgres:@localhost:5432/noclickops?sslmode=disable"
+# Optional: admin connection to create DB; if omitted, derived from database_url pointing to /postgres
+# admin_database_url: "postgres://postgres:postgres@host:5432/postgres?sslmode=disable"
+jwt_secret: "change-me"
+
+deployment_type: "kubernetes"
+scanner_image: "noclickops-scanner:2025-11-29-d62555"

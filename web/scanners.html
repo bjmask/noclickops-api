@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NoClickOps Scanners</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --muted: #9ca3af;
+      --accent: #22d3ee;
+      --accent2: #7c3aed;
+      --card: #0b1220;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: #e5e7eb;
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 280px 1fr;
+    }
+
+    aside {
+      background: var(--panel);
+      border-right: 1px solid rgba(255, 255, 255, 0.05);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    main {
+      padding: 24px;
+    }
+
+    .brand {
+      font-weight: 800;
+      letter-spacing: 0.3px;
+    }
+
+    .nav-link {
+      color: #e5e7eb;
+      text-decoration: none;
+      padding: 8px 0;
+      display: block;
+    }
+
+    .nav-link:hover {
+      color: var(--accent);
+    }
+
+    .card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    h2,
+    h3 {
+      margin: 0 0 8px;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    label {
+      display: block;
+      margin: 8px 0 4px;
+      font-weight: 600;
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      padding: 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: #0f172a;
+      color: #e5e7eb;
+    }
+
+    textarea {
+      min-height: 80px;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+      font-weight: 700;
+      color: #0f172a;
+      margin-top: 10px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+    }
+
+    .error {
+      color: #f87171;
+      margin-top: 8px;
+    }
+
+    pre {
+      background: #0b1220;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      overflow: auto;
+      font-size: 13px;
+    }
+
+    .tag {
+      display: inline-flex;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(34, 211, 238, 0.1);
+      color: var(--accent);
+    }
+
+    .subscription {
+      border: 1px dashed rgba(255, 255, 255, 0.15);
+      padding: 12px;
+      border-radius: 10px;
+      margin-bottom: 8px;
+    }
+
+    .iam-only,
+    .kube-only {
+      display: block;
+    }
+  </style>
+</head>
+
+<body>
+  <aside>
+    <div class="brand">NoClickOps</div>
+    <a class="nav-link" href="/dashboard.html">Dashboard</a>
+    <a class="nav-link" href="/findings.html">Findings</a>
+    <a class="nav-link" href="/scanners.html">Scanners</a>
+    <a class="nav-link" href="/">Login</a>
+  </aside>
+  <main>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+        <div>
+          <h2>Create Scanner</h2>
+          <p class="muted">Fill fields derived from noclickops-scanner config. Choose source (cloudtrail or kinesis) and
+            preview payload.</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <button class="btn" id="preview">Preview config JSON</button>
+          <button class="btn" id="create-btn" style="background:linear-gradient(135deg,#34d399,#10b981);">Create
+            scanner</button>
+        </div>
+      </div>
+      <div id="err" class="error" style="display:none;"></div>
+      <div class="row">
+        <div>
+          <label>Scanner Name</label>
+          <input id="sc-name" placeholder="my-scanner" />
+        </div>
+        <div>
+          <label>Scanner Type</label>
+          <select id="scanner-type">
+            <option value="iam">IAM (CloudTrail/Kinesis)</option>
+            <option value="kube-audit">Kube Audit</option>
+          </select>
+        </div>
+        <div>
+          <label>Cloud Provider</label>
+          <select id="cloud-provider">
+            <option value="aws">AWS</option>
+            <option value="gcp">GCP</option>
+            <option value="azure">Azure</option>
+          </select>
+        </div>
+        <div class="iam-only">
+          <label>Source</label>
+          <select id="source">
+            <option value="cloudtrail">cloudtrail</option>
+            <option value="kinesis">kinesis</option>
+          </select>
+        </div>
+        <div>
+          <label>Region</label>
+          <input id="region" placeholder="us-west-2" />
+        </div>
+        <div class="iam-only">
+          <label>Kinesis Stream (if kinesis)</label>
+          <input id="kinesis-stream" placeholder="stream-name" />
+        </div>
+        <div class="iam-only">
+          <label>AWS Account ID (optional)</label>
+          <input id="aws-account" placeholder="123456789012" />
+        </div>
+        <div>
+          <label>Lookback minutes (overrides hours)</label>
+          <input id="lookback-minutes" type="number" min="0" placeholder="e.g. 15" />
+        </div>
+        <div>
+          <label>Lookback hours (fallback)</label>
+          <input id="lookback-hours" type="number" min="0" placeholder="e.g. 1" />
+        </div>
+        <div>
+          <label>Poll interval (milliseconds)</label>
+          <input id="poll-ms" type="number" min="50" step="50" placeholder="1000" />
+        </div>
+        <div class="kube-only">
+          <label>Audit Log Group (CloudWatch)</label>
+          <input id="kube-log-group" placeholder="/aws/eks/cluster/audit" />
+        </div>
+        <div class="kube-only">
+          <label>Audit Stream Prefix</label>
+          <input id="kube-log-prefix" placeholder="kube-apiserver-audit" />
+        </div>
+        <div class="kube-only">
+          <label>Kube verbs (newline separated)</label>
+          <textarea id="kube-verbs"
+            placeholder="create\nupdate\npatch\ndelete\ndeletecollection\nexec\nport-forward\nportforward\ncp"></textarea>
+        </div>
+        <div class="kube-only">
+          <label>Kube ignore users (glob, newline separated)</label>
+          <textarea id="kube-ignore-users" placeholder="system:node:*"></textarea>
+        </div>
+      </div>
+
+      <h3 class="iam-detection">IAM Detection</h3>
+      <div class="row iam-detection">
+        <div>
+          <label>Console user agents (newline separated)</label>
+          <textarea id="console-uas"></textarea>
+        </div>
+        <div>
+          <label>Terraform user agents (newline separated)</label>
+          <textarea id="tf-uas"></textarea>
+        </div>
+        <div>
+          <label>Terraform role hints (newline separated)</label>
+          <textarea id="tf-roles"></textarea>
+        </div>
+      </div>
+
+      <h3 class="iam-detection">Filters</h3>
+      <div class="row iam-detection">
+        <div>
+          <label>Ignore actors (newline separated)</label>
+          <textarea id="ignore-actors"></textarea>
+        </div>
+        <div>
+          <label>Ignore user agents (newline separated)</label>
+          <textarea id="ignore-uas"></textarea>
+        </div>
+      </div>
+      <div class="row iam-detection">
+        <div>
+          <label>Allowed events (newline separated)</label>
+          <textarea id="whitelist-events"></textarea>
+        </div>
+        <div>
+          <label>Disallowed events (newline separated)</label>
+          <textarea id="blacklist-events"></textarea>
+        </div>
+      </div>
+
+      <h3>Jira</h3>
+      <div class="row">
+        <div>
+          <label>Base URL</label>
+          <input id="jira-url" placeholder="https://example.atlassian.net" />
+        </div>
+        <div>
+          <label>Project Key</label>
+          <input id="jira-project" placeholder="OPS" />
+        </div>
+        <div>
+          <label>Issue Type</label>
+          <input id="jira-issue" placeholder="Task" />
+        </div>
+        <div>
+          <label>JIRA_EMAIL</label>
+          <input id="jira-email" placeholder="user@example.com" />
+        </div>
+      </div>
+
+      <h3>Credentials (optional)</h3>
+      <div class="row">
+        <div>
+          <label>AWS_ACCESS_KEY_ID</label>
+          <input id="aws-ak" placeholder="leave blank to omit" />
+        </div>
+        <div>
+          <label>AWS_SECRET_ACCESS_KEY</label>
+          <input id="aws-sk" placeholder="leave blank to omit" />
+        </div>
+        <div>
+          <label>AWS_SESSION_TOKEN</label>
+          <input id="aws-st" placeholder="leave blank to omit" />
+        </div>
+        <div>
+          <label>JIRA_TOKEN</label>
+          <input id="jira-token" placeholder="leave blank to omit" />
+        </div>
+      </div>
+
+      <pre id="output"></pre>
+    </div>
+  </main>
+
+  <script>
+    const output = document.getElementById("output");
+    const err = document.getElementById("err");
+    const token = localStorage.getItem("noclickops_token") || "";
+    applyDefaults();
+
+    function toggleFields() {
+      const type = document.getElementById("scanner-type").value;
+      document.querySelectorAll(".iam-only").forEach(el => {
+        el.style.display = type === "iam" ? "block" : "none";
+      });
+      document.querySelectorAll(".kube-only").forEach(el => {
+        el.style.display = type === "kube-audit" ? "block" : "none";
+      });
+      document.querySelectorAll(".iam-detection").forEach(el => {
+        el.style.display = type === "iam" ? "block" : "none";
+      });
+      document.querySelectorAll(".kube-detection").forEach(el => {
+        el.style.display = type === "kube-audit" ? "block" : "none";
+      });
+    }
+    document.getElementById("scanner-type").addEventListener("change", toggleFields);
+    toggleFields();
+
+    function parseLines(id) {
+      return document.getElementById(id).value
+        .split("\n")
+        .map(s => s.trim())
+        .filter(Boolean);
+    }
+
+    document.getElementById("preview").addEventListener("click", () => {
+      err.style.display = "none";
+      const scannerPayload = buildPayload();
+      output.textContent = JSON.stringify(scannerPayload, null, 2);
+    });
+
+    function emptyToNull(v) { return v === "" ? null : v; }
+
+    function buildPayload() {
+      const cfg = {
+        detection: {
+          console_user_agents: parseLines("console-uas"),
+          terraform_user_agents: parseLines("tf-uas"),
+          terraform_role_hints: parseLines("tf-roles"),
+        },
+        ignore_actors: parseLines("ignore-actors"),
+        ignore_user_agents: parseLines("ignore-uas"),
+        whitelist_events: parseLines("whitelist-events"),
+        blacklist_events: parseLines("blacklist-events"),
+        jira: {
+          base_url: emptyToNull(document.getElementById("jira-url").value.trim()),
+          project_key: emptyToNull(document.getElementById("jira-project").value.trim()),
+          issue_type: emptyToNull(document.getElementById("jira-issue").value.trim()),
+          email: emptyToNull(document.getElementById("jira-email").value.trim()),
+        },
+      };
+
+      const scannerType = document.getElementById("scanner-type").value;
+      const region = emptyToNull(document.getElementById("region").value.trim());
+      const lookbackMinutes = parseInt(document.getElementById("lookback-minutes").value, 10);
+      const lookbackHours = parseInt(document.getElementById("lookback-hours").value, 10);
+      const pollMs = parseInt(document.getElementById("poll-ms").value, 10);
+      if (!isNaN(lookbackMinutes)) cfg.lookback_minutes = lookbackMinutes;
+      if (!isNaN(lookbackHours)) cfg.lookback_hours = lookbackHours;
+      if (!isNaN(pollMs)) cfg.poll_milliseconds = pollMs;
+
+      if (scannerType === "iam") {
+        cfg.source = document.getElementById("source").value;
+        cfg.region = region;
+        cfg.kinesis_stream = emptyToNull(document.getElementById("kinesis-stream").value.trim());
+        cfg.aws = {
+          region,
+          account_id: emptyToNull((document.getElementById("aws-account") || {}).value?.trim() || ""),
+          poll_milliseconds: cfg.poll_milliseconds,
+          lookback_minutes: cfg.lookback_minutes,
+          lookback_hours: cfg.lookback_hours,
+        };
+      } else {
+        cfg.source = "kubernetes-cloudwatch";
+        const kubeVerbs = parseLines("kube-verbs");
+        const kubeIgnore = parseLines("kube-ignore-users");
+        cfg.kubernetes = {
+          region,
+          cloudwatch_log_group: emptyToNull(document.getElementById("kube-log-group").value.trim()),
+          cloudwatch_log_stream_prefix: emptyToNull(document.getElementById("kube-log-prefix").value.trim()),
+          kube_verbs: kubeVerbs,
+          kube_ignore_users: kubeIgnore,
+          poll_milliseconds: cfg.poll_milliseconds,
+          lookback_minutes: cfg.lookback_minutes,
+          lookback_hours: cfg.lookback_hours,
+        };
+      }
+
+      return {
+        name: document.getElementById("sc-name").value.trim(),
+        cloud_provider: document.getElementById("cloud-provider").value,
+        config: cfg,
+        aws_access_key_id: emptyToNull((document.getElementById("aws-ak") || {}).value?.trim() || "") || undefined,
+        aws_secret_access_key: emptyToNull((document.getElementById("aws-sk") || {}).value?.trim() || "") || undefined,
+        aws_session_token: emptyToNull((document.getElementById("aws-st") || {}).value?.trim() || "") || undefined,
+        jira_token: emptyToNull((document.getElementById("jira-token") || {}).value?.trim() || "") || undefined,
+      };
+    }
+
+    function redirectToLogin() {
+      localStorage.removeItem("noclickops_token");
+      window.location.href = "/";
+    }
+
+    async function api(path, opts = {}) {
+      const headers = opts.headers || {};
+      headers["Content-Type"] = "application/json";
+      if (token) headers["Authorization"] = "Bearer " + token;
+      const res = await fetch(path, { ...opts, headers });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        redirectToLogin();
+        throw "unauthorized";
+      }
+      if (!res.ok) throw data.error || res.statusText;
+      return data;
+    }
+
+    async function createScanner() {
+      try {
+        const payload = buildPayload();
+        if (!payload.name) {
+          err.style.display = "block";
+          err.textContent = "Scanner name is required";
+          return;
+        }
+        err.style.display = "none";
+        output.textContent = "Submitting...";
+        const res = await api("/v1/scanners", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        output.textContent = "Created scanner:\n" + JSON.stringify(res, null, 2);
+        loadScanners();
+      } catch (e) {
+        err.style.display = "block";
+        err.textContent = e;
+      }
+    }
+
+    async function loadScanners() {
+      if (!token) redirectToLogin();
+      try {
+        const list = await api("/v1/scanners", { method: "GET" });
+        // Optionally show somewhere
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+
+    document.getElementById("create-btn").addEventListener("click", createScanner);
+
+    if (!token) redirectToLogin();
+    loadScanners();
+
+    function applyDefaults() {
+      // Defaults from noclickops-scanner/config.yaml
+      document.getElementById("source").value = "cloudtrail";
+      document.getElementById("cloud-provider").value = "aws";
+      document.getElementById("region").value = "";
+      document.getElementById("kube-log-prefix").value = "kube-apiserver-audit";
+      document.getElementById("kube-verbs").value = [
+        "create", "update", "patch", "delete", "deletecollection", "exec", "port-forward", "portforward", "cp"
+      ].join("\n");
+      document.getElementById("console-uas").value = [
+        "console.amazonaws.com",
+        "signin.amazonaws.com",
+        "*mozilla*",
+        "*chrome*",
+        "*safari*",
+        "*firefox*",
+        "*edge*"
+      ].join("\n");
+      document.getElementById("tf-uas").value = ["terraform", "tfc-agent"].join("\n");
+      document.getElementById("tf-roles").value = ["terraform", "tf-controller"].join("\n");
+      document.getElementById("ignore-actors").value = [
+        "aws-reserved/sso.amazonaws.com",
+        "AWSServiceRoleForAmazonEKS*",
+        "arn:aws:sts::*:assumed-role/test-us-west-2-singleton-management/*",
+        "arn:aws:sts::*:assumed-role/AWSServiceRole*",
+        "arn:aws:sts::*:assumed-role/PrismaCloudOrgRole*",
+        "arn:aws:sts::*:assumed-role/*pecan*",
+        "arn:aws:sts::*:assumed-role/*pistachio*"
+      ].join("\n");
+      document.getElementById("ignore-uas").value = [
+        "aws-sdk-go*",
+        "eks.amazonaws.com",
+        "autoscaling.amazonaws.com",
+        "arn:aws:sts::015096527731:assumed-role/PrismaCloudOrgRole*",
+        "arn:aws:sts::015096527731:assumed-role/*node-group*",
+        "aws-sdk-rust/1.3.10",
+        "securityhub.amazonaws.com"
+      ].join("\n");
+      document.getElementById("whitelist-events").value = [
+        "Create*", "Put*", "Update*", "Delete*", "Attach*", "Detach*", "Enable*", "Disable*", "Set*",
+        "Associate*", "Disassociate*", "Register*", "Deregister*", "Tag*", "Untag*", "Start*", "Stop*",
+        "RunInstances", "Launch*", "Allocate*", "Release*", "Authorize*", "Revoke*", "Add*", "Remove*",
+        "Import*", "Export*", "Copy*", "Move*", "Apply*", "Submit*", "Cancel*", "Execute*", "Provision*",
+        "Deprovision*", "Deploy*", "Invoke*", "Restart*", "Reboot*", "Suspend*", "Resume*", "Publish*",
+        "Unpublish*", "Rotate*"
+      ].join("\n");
+      document.getElementById("blacklist-events").value = ["PutObject"].join("\n");
+      document.getElementById("jira-url").value = "https://adecastro.atlassian.net";
+      document.getElementById("jira-project").value = "NOCLICKOPS";
+      document.getElementById("jira-issue").value = "Initiative";
+    }
+  </script>
+</body>
+
+</html>

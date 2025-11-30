@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NoClickOps</title>
+  <style>
+    :root {
+      --bg: #05070d;
+      --surface: rgba(16, 20, 31, 0.8);
+      --border: rgba(255, 255, 255, 0.08);
+      --muted: #b5c1d2;
+      --fg: #e8edf5;
+      --accent: #7c3aed;
+      --accent2: #22d3ee;
+      --glow: 0 25px 80px rgba(124, 58, 237, 0.25);
+      --glass: rgba(255, 255, 255, 0.04);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Inter", "Space Grotesk", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(1200px 1200px at 10% 20%, rgba(124,58,237,0.12), transparent 50%),
+        radial-gradient(900px 900px at 80% 10%, rgba(34,211,238,0.12), transparent 50%),
+        linear-gradient(160deg, #05070d, #0a0f1c 50%, #05070d);
+      color: var(--fg);
+      min-height: 100vh;
+      padding: 32px 18px 48px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      max-width: 1180px;
+      margin: 0 auto 24px;
+    }
+    nav a {
+      color: var(--muted);
+      text-decoration: none;
+      padding: 8px 10px;
+      border-radius: 10px;
+      transition: all 140ms ease;
+    }
+    nav a:hover { color: var(--fg); background: var(--glass); }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 800;
+      font-size: 20px;
+      letter-spacing: 0.4px;
+    }
+    .pill {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #05070d;
+      padding: 8px 12px;
+      border-radius: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      box-shadow: var(--glow);
+    }
+    .hero {
+      max-width: 1180px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 18px;
+    }
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 22px;
+      backdrop-filter: blur(12px);
+      box-shadow: var(--glow);
+    }
+    .hero h1 {
+      margin: 0 0 10px;
+      font-size: clamp(28px, 4vw, 36px);
+      line-height: 1.1;
+    }
+    .hero p { color: var(--muted); margin: 0 0 14px; }
+    .cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      text-decoration: none;
+      color: var(--fg);
+      background: linear-gradient(135deg, rgba(124,58,237,0.2), rgba(34,211,238,0.12));
+      font-weight: 700;
+    }
+    .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .chip {
+      background: var(--glass);
+      border: 1px solid var(--border);
+      padding: 6px 10px;
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .feature-grid {
+      max-width: 1180px;
+      margin: 20px auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px;
+    }
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 16px;
+      min-height: 160px;
+      backdrop-filter: blur(10px);
+    }
+    .feature-card h3 { margin: 0 0 6px; }
+    .feature-card p { margin: 0; color: var(--muted); }
+    form {
+      display: grid;
+      gap: 10px;
+    }
+    input, button {
+      font: inherit;
+      padding: 11px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: #0c101d;
+      color: var(--fg);
+    }
+    button {
+      cursor: pointer;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #05070d;
+      font-weight: 800;
+      border: none;
+      transition: transform 120ms ease, box-shadow 120ms ease;
+      box-shadow: 0 12px 30px rgba(34,211,238,0.25);
+    }
+    button:hover { transform: translateY(-1px); box-shadow: 0 14px 36px rgba(124,58,237,0.25); }
+    .error { color: #f87171; font-size: 13px; display: none; }
+    .hidden { display: none; }
+    .login-card { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 18px; }
+    .tagline { color: var(--muted); margin: 4px 0 0; }
+    .pill-link { color: var(--fg); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="pill">NoClickOps</span>
+      <span class="tagline">Catch ClickOps. Ship change safely.</span>
+    </div>
+    <nav>
+      <a href="/docs.html">Docs</a>
+      <a href="/scanners.html">Scanners</a>
+      <a id="go-dashboard" href="/dashboard.html">Dashboard</a>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <div class="panel">
+      <h1>See every click. Prove every change.</h1>
+      <p>Live detection across cloud APIs and Kubernetes audit logs with JIRA signal, not noise.</p>
+      <div class="chips">
+        <span class="chip">CloudTrail &amp; Kinesis</span>
+        <span class="chip">Kube audit</span>
+        <span class="chip">JIRA dedupe</span>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;">
+        <a class="cta" href="/dashboard.html">Go to Dashboard</a>
+        <a class="cta" href="/docs.html" style="background:var(--glass);border:1px solid var(--border);">Read the Docs</a>
+      </div>
+    </div>
+    <div class="login-card">
+      <h3>Sign in</h3>
+      <p class="muted" style="margin:0 0 8px;">Access your tenant and manage scanners.</p>
+      <form id="login-form">
+        <input type="email" id="email" placeholder="Email" required />
+        <input type="password" id="password" placeholder="Password" required />
+        <button type="submit">Sign in</button>
+        <div id="login-error" class="error"></div>
+      </form>
+      <div id="user-chip" class="chip hidden" style="margin-top:10px;"></div>
+    </div>
+  </section>
+
+  <section class="feature-grid">
+    <div class="feature-card">
+      <h3>Multi-source ingestion</h3>
+      <p>Stream CloudTrail/Kinesis events and Kubernetes audit logs with millisecond polling and flexible lookbacks.</p>
+    </div>
+    <div class="feature-card">
+      <h3>Smart suppression</h3>
+      <p>Glob-based ignores and per-source filtering keep noisy service accounts from creating tickets.</p>
+    </div>
+    <div class="feature-card">
+      <h3>JIRA dedupe</h3>
+      <p>Issue creation uses stable hashes to avoid floods, with suppression-aware handling for kube audit events.</p>
+    </div>
+  </section>
+
+  <script>
+    const loginForm = document.getElementById("login-form");
+    const loginError = document.getElementById("login-error");
+    const userChip = document.getElementById("user-chip");
+    const goDashboard = document.getElementById("go-dashboard");
+
+    let token = localStorage.getItem("noclickops_token") || "";
+
+    function setToken(t) {
+      token = t;
+      if (t) localStorage.setItem("noclickops_token", t);
+      goDashboard.style.opacity = t ? 1 : 0.6;
+      goDashboard.style.pointerEvents = t ? "auto" : "none";
+    }
+
+    async function api(path, opts = {}) {
+      const headers = opts.headers || {};
+      if (token) headers["Authorization"] = "Bearer " + token;
+      headers["Content-Type"] = "application/json";
+      const res = await fetch(path, { ...opts, headers });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw data.error || res.statusText;
+      return data;
+    }
+
+    async function refreshMe() {
+      if (!token) {
+        goDashboard.style.opacity = 0.6;
+        goDashboard.style.pointerEvents = "none";
+        return;
+      }
+      try {
+        const me = await api("/me");
+        userChip.textContent = me.email;
+        userChip.classList.remove("hidden");
+        goDashboard.style.opacity = 1;
+        goDashboard.style.pointerEvents = "auto";
+      } catch (err) {
+        console.warn(err);
+        setToken("");
+        userChip.classList.add("hidden");
+      }
+    }
+
+    loginForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      loginError.classList.add("hidden");
+      const email = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value;
+      try {
+        const res = await api("/v1/login", {
+          method: "POST",
+          body: JSON.stringify({ email, password }),
+          headers: { "Content-Type": "application/json" }
+        });
+        setToken(res.token);
+        window.location.href = "/dashboard.html";
+      } catch (err) {
+        loginError.textContent = err || "Login failed";
+        loginError.style.display = "block";
+      }
+    });
+
+    refreshMe();
+  </script>
+</body>
+</html>
