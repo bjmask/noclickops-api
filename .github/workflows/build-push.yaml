@@ -40,5 +40,5 @@ jobs:
         tags: |
           us-central1-docker.pkg.dev/${{ env.PROJECT_ID }}/noclickops/${{ env.IMAGE_NAME }}:latest
           us-central1-docker.pkg.dev/${{ env.PROJECT_ID }}/noclickops/${{ env.IMAGE_NAME }}:${{ github.sha }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        # cache-from: type=gha
+        # cache-to: type=gha,mode=max
