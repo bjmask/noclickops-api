@@ -5,347 +5,338 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NoClickOps Scanners</title>
+  <link rel="stylesheet" href="/static/style.css">
   <style>
-    :root {
-      --bg: #0f172a;
-      --panel: #111827;
-      --muted: #9ca3af;
-      --accent: #22d3ee;
-      --accent2: #7c3aed;
-      --card: #0b1220;
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    body {
-      margin: 0;
-      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: var(--bg);
-      color: #e5e7eb;
-      min-height: 100vh;
-      display: grid;
-      grid-template-columns: 280px 1fr;
-    }
-
-    aside {
-      background: var(--panel);
-      border-right: 1px solid rgba(255, 255, 255, 0.05);
-      padding: 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    main {
-      padding: 24px;
-    }
-
-    .brand {
-      font-weight: 800;
-      letter-spacing: 0.3px;
-    }
-
-    .nav-link {
-      color: #e5e7eb;
-      text-decoration: none;
-      padding: 8px 0;
-      display: block;
-    }
-
-    .nav-link:hover {
-      color: var(--accent);
-    }
-
-    .card {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid rgba(255, 255, 255, 0.05);
-      border-radius: 14px;
-      padding: 16px;
-      margin-bottom: 16px;
-    }
-
-    h2,
-    h3 {
-      margin: 0 0 8px;
-    }
-
-    .muted {
-      color: var(--muted);
-    }
-
-    label {
-      display: block;
-      margin: 8px 0 4px;
-      font-weight: 600;
-    }
-
-    input,
-    select,
-    textarea {
-      width: 100%;
-      padding: 10px;
-      border-radius: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      background: #0f172a;
-      color: #e5e7eb;
-    }
-
-    textarea {
-      min-height: 80px;
-    }
-
-    .row {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 12px;
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 10px 12px;
-      border-radius: 10px;
-      border: none;
-      cursor: pointer;
-      font-weight: 700;
-      color: #0f172a;
-      margin-top: 10px;
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
-    }
-
-    .error {
-      color: #f87171;
-      margin-top: 8px;
-    }
-
-    pre {
-      background: #0b1220;
-      padding: 12px;
-      border-radius: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      overflow: auto;
-      font-size: 13px;
-    }
-
-    .tag {
-      display: inline-flex;
-      padding: 4px 8px;
-      border-radius: 999px;
-      background: rgba(34, 211, 238, 0.1);
-      color: var(--accent);
-    }
-
-    .subscription {
-      border: 1px dashed rgba(255, 255, 255, 0.15);
-      padding: 12px;
-      border-radius: 10px;
-      margin-bottom: 8px;
-    }
-
-    .iam-only,
-    .kube-only {
-      display: block;
+    .masked-input {
+      -webkit-text-security: disc;
+      text-security: disc;
     }
   </style>
 </head>
 
 <body>
-  <aside>
-    <div class="brand">NoClickOps</div>
-    <a class="nav-link" href="/dashboard.html">Dashboard</a>
-    <a class="nav-link" href="/findings.html">Findings</a>
-    <a class="nav-link" href="/scanners.html">Scanners</a>
-    <a class="nav-link" href="/">Login</a>
-  </aside>
-  <main>
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
-        <div>
-          <h2>Create Scanner</h2>
-          <p class="muted">Fill fields derived from noclickops-scanner config. Choose source (cloudtrail or kinesis) and
-            preview payload.</p>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <button class="btn" id="preview">Preview config JSON</button>
-          <button class="btn" id="create-btn" style="background:linear-gradient(135deg,#34d399,#10b981);">Create
-            scanner</button>
-        </div>
+  <div class="layout-dashboard">
+    <aside>
+      <div class="brand">
+        <div class="brand-icon">N</div>
+        <span>NoClickOps</span>
       </div>
-      <div id="err" class="error" style="display:none;"></div>
-      <div class="row">
+
+      <div class="nav-group">
+        <div class="nav-label">Platform</div>
+        <a class="nav-link" href="/dashboard.html">Dashboard</a>
+        <a class="nav-link" href="/findings.html">Findings</a>
+        <a class="nav-link active" href="/scanners.html">Scanners</a>
+        <a class="nav-link" href="/docs.html">Docs</a>
+      </div>
+
+      <div style="margin-top:auto;">
+        <button id="logout-btn" class="btn btn-secondary" style="width:100%;">Logout</button>
+      </div>
+    </aside>
+
+    <main>
+      <div class="page-header">
         <div>
-          <label>Scanner Name</label>
-          <input id="sc-name" placeholder="my-scanner" />
-        </div>
-        <div>
-          <label>Scanner Type</label>
-          <select id="scanner-type">
-            <option value="iam">IAM (CloudTrail/Kinesis)</option>
-            <option value="kube-audit">Kube Audit</option>
-          </select>
-        </div>
-        <div>
-          <label>Cloud Provider</label>
-          <select id="cloud-provider">
-            <option value="aws">AWS</option>
-            <option value="gcp">GCP</option>
-            <option value="azure">Azure</option>
-          </select>
-        </div>
-        <div class="iam-only">
-          <label>Source</label>
-          <select id="source">
-            <option value="cloudtrail">cloudtrail</option>
-            <option value="kinesis">kinesis</option>
-          </select>
+          <h1 class="page-title">Scanners</h1>
+          <p class="page-desc">Manage your infrastructure scanners.</p>
         </div>
         <div>
-          <label>Region</label>
-          <input id="region" placeholder="us-west-2" />
-        </div>
-        <div class="iam-only">
-          <label>Kinesis Stream (if kinesis)</label>
-          <input id="kinesis-stream" placeholder="stream-name" />
-        </div>
-        <div class="iam-only">
-          <label>AWS Account ID (optional)</label>
-          <input id="aws-account" placeholder="123456789012" />
-        </div>
-        <div>
-          <label>Lookback minutes (overrides hours)</label>
-          <input id="lookback-minutes" type="number" min="0" placeholder="e.g. 15" />
-        </div>
-        <div>
-          <label>Lookback hours (fallback)</label>
-          <input id="lookback-hours" type="number" min="0" placeholder="e.g. 1" />
-        </div>
-        <div>
-          <label>Poll interval (milliseconds)</label>
-          <input id="poll-ms" type="number" min="50" step="50" placeholder="1000" />
-        </div>
-        <div class="kube-only">
-          <label>Audit Log Group (CloudWatch)</label>
-          <input id="kube-log-group" placeholder="/aws/eks/cluster/audit" />
-        </div>
-        <div class="kube-only">
-          <label>Audit Stream Prefix</label>
-          <input id="kube-log-prefix" placeholder="kube-apiserver-audit" />
-        </div>
-        <div class="kube-only">
-          <label>Kube verbs (newline separated)</label>
-          <textarea id="kube-verbs"
-            placeholder="create\nupdate\npatch\ndelete\ndeletecollection\nexec\nport-forward\nportforward\ncp"></textarea>
-        </div>
-        <div class="kube-only">
-          <label>Kube ignore users (glob, newline separated)</label>
-          <textarea id="kube-ignore-users" placeholder="system:node:*"></textarea>
+          <button class="btn btn-primary" id="open-create-btn">Create Scanner</button>
         </div>
       </div>
 
-      <h3 class="iam-detection">IAM Detection</h3>
-      <div class="row iam-detection">
-        <div>
-          <label>Console user agents (newline separated)</label>
-          <textarea id="console-uas"></textarea>
+      <div id="scanners-list" style="display:grid;gap:16px;margin-bottom:32px;">
+        <!-- Scanners will be loaded here -->
+        <div style="color:var(--text-muted);">Loading scanners...</div>
+      </div>
+
+      <div id="create-form" style="display:none;">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title" style="font-size:1.5rem;">New Scanner Config</h2>
+          </div>
+          <div style="display:flex;gap:12px;">
+            <button class="btn btn-secondary" id="cancel-create-btn">Cancel</button>
+            <button class="btn btn-secondary" id="preview">Preview Config</button>
+            <button class="btn btn-primary" id="create-btn">Save Scanner</button>
+          </div>
         </div>
+
+        <div class="error" id="err" style="display:none;margin-bottom:24px;"></div>
+
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:24px;">
         <div>
-          <label>Terraform user agents (newline separated)</label>
-          <textarea id="tf-uas"></textarea>
+          <div class="card">
+            <h3 style="margin-bottom:20px;">General Configuration</h3>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+              <div class="input-group">
+                <label class="input-label">Scanner Name</label>
+                <input id="sc-name" placeholder="my-scanner" />
+              </div>
+              <div class="input-group">
+                <label class="input-label">Cloud Provider</label>
+                <select id="cloud-provider">
+                  <option value="aws">AWS</option>
+                  <option value="gcp">GCP</option>
+                  <option value="azure">Azure</option>
+                </select>
+              </div>
+              <div class="input-group">
+                <label class="input-label">Scanner Type</label>
+                <select id="scanner-type">
+                  <option value="iam">IAM (CloudTrail/Kinesis)</option>
+                  <option value="kube-audit">Kube Audit</option>
+                </select>
+              </div>
+              <div class="input-group">
+                <label class="input-label">Region</label>
+                <input id="region" placeholder="us-west-2" />
+              </div>
+              <div class="input-group">
+                <label class="input-label">Labels (key=value)</label>
+                <textarea id="labels" rows="3" placeholder="env=prod&#10;team=platform"></textarea>
+              </div>
+            </div>
+  
+            <div class="iam-only" style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+              <div class="input-group">
+                <label class="input-label">Source</label>
+                <select id="source">
+                  <option value="cloudtrail">cloudtrail</option>
+                  <option value="kinesis">kinesis</option>
+                </select>
+              </div>
+              <div class="input-group">
+                <label class="input-label">Kinesis Stream (if kinesis)</label>
+                <input id="kinesis-stream" placeholder="stream-name" />
+              </div>
+              <div class="input-group">
+                <label class="input-label">AWS Account ID (optional)</label>
+                <input id="aws-account" placeholder="123456789012" />
+              </div>
+            </div>
+
+            <div class="kube-only" style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+              <div class="input-group">
+                <label class="input-label">Audit Log Group</label>
+                <input id="kube-log-group" placeholder="/aws/eks/cluster/audit" />
+              </div>
+              <div class="input-group">
+                <label class="input-label">Audit Stream Prefix</label>
+                <input id="kube-log-prefix" placeholder="kube-apiserver-audit" />
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 style="margin-bottom:20px;">Detection Rules</h3>
+
+            <div class="iam-detection">
+              <div class="input-group">
+                <label class="input-label">Console user agents (newline separated)</label>
+                <textarea id="console-uas" rows="4"></textarea>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                <div class="input-group">
+                  <label class="input-label">Terraform user agents</label>
+                  <textarea id="tf-uas" rows="4"></textarea>
+                </div>
+                <div class="input-group">
+                  <label class="input-label">Terraform role hints</label>
+                  <textarea id="tf-roles" rows="4"></textarea>
+                </div>
+              </div>
+            </div>
+
+            <div class="kube-only">
+              <div class="input-group">
+                <label class="input-label">Kube verbs</label>
+                <textarea id="kube-verbs" rows="4" placeholder="create\nupdate..."></textarea>
+              </div>
+              <div class="input-group">
+                <label class="input-label">Kube ignore users (glob)</label>
+                <textarea id="kube-ignore-users" rows="4" placeholder="system:node:*"></textarea>
+              </div>
+            </div>
+
+            <h4 style="margin-top:24px;margin-bottom:16px;color:var(--text-muted);">Filters</h4>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+              <div class="input-group iam-only">
+                <label class="input-label">Ignore actors</label>
+                <textarea id="ignore-actors" rows="4"></textarea>
+              </div>
+              <div class="input-group">
+                <label class="input-label">Ignore user agents</label>
+                <textarea id="ignore-uas" rows="4"></textarea>
+              </div>
+              <div class="input-group">
+                <label class="input-label">Allowed events</label>
+                <textarea id="whitelist-events" rows="4"></textarea>
+              </div>
+              <div class="input-group">
+                <label class="input-label">Disallowed events</label>
+                <textarea id="blacklist-events" rows="4"></textarea>
+              </div>
+            </div>
+          </div>
         </div>
+
         <div>
-          <label>Terraform role hints (newline separated)</label>
-          <textarea id="tf-roles"></textarea>
+          <div class="card">
+            <h3 style="margin-bottom:20px;">Settings</h3>
+            <div class="input-group">
+              <label class="input-label">Lookback minutes</label>
+              <input id="lookback-minutes" type="number" min="0" placeholder="e.g. 15" />
+            </div>
+            <div class="input-group">
+              <label class="input-label">Lookback hours</label>
+              <input id="lookback-hours" type="number" min="0" placeholder="e.g. 1" />
+            </div>
+            <div class="input-group">
+              <label class="input-label">Poll interval (ms)</label>
+              <input id="poll-ms" type="number" min="50" step="50" placeholder="1000" />
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 style="margin-bottom:20px;">Jira Integration</h3>
+            <div class="input-group">
+              <label class="input-label">Base URL</label>
+              <input id="jira-url" placeholder="https://example.atlassian.net" />
+            </div>
+            <div class="input-group">
+              <label class="input-label">Project Key</label>
+              <input id="jira-project" placeholder="OPS" />
+            </div>
+            <div class="input-group">
+              <label class="input-label">Issue Type</label>
+              <input id="jira-issue" placeholder="Task" />
+            </div>
+            <div class="input-group">
+              <label class="input-label">JIRA_EMAIL</label>
+              <input id="jira-email" placeholder="user@example.com" />
+            </div>
+            <div class="input-group">
+              <label class="input-label">JIRA_TOKEN</label>
+              <input id="jira-token" autocomplete="off" type="password" placeholder="leave blank to omit" />
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 style="margin-bottom:20px;">Credentials</h3>
+            <!-- Anti-autofill trap -->
+            <div style="height:0;overflow:hidden;">
+              <input type="text" name="fake_user_trap" tabindex="-1" />
+              <input type="password" name="fake_pass_trap" tabindex="-1" />
+            </div>
+
+            <form autocomplete="off" onsubmit="return false;">
+              <div class="input-group">
+                <label class="input-label">AWS_ACCESS_KEY_ID</label>
+                <input id="aws-ak" name="noclickops_ak_field" placeholder="optional" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" style="background-color:inherit;" />
+              </div>
+              <div class="input-group">
+                <label class="input-label">AWS_SECRET_ACCESS_KEY</label>
+                <input id="aws-ak" name="noclickops_ak_field" placeholder="optional" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" style="background-color:inherit;" />
+              </div>
+              <div class="input-group">
+                <label class="input-label">AWS_SESSION_TOKEN</label>
+                <textarea id="aws-st" name="noclickops_st_field" placeholder="optional" class="masked-input" rows="1" style="resize:none; overflow:hidden; white-space:nowrap; padding-top:10px;"></textarea>
+              </div>
+            </form>
+          </div>
         </div>
       </div>
 
-      <h3 class="iam-detection">Filters</h3>
-      <div class="row iam-detection">
-        <div>
-          <label>Ignore actors (newline separated)</label>
-          <textarea id="ignore-actors"></textarea>
-        </div>
-        <div>
-          <label>Ignore user agents (newline separated)</label>
-          <textarea id="ignore-uas"></textarea>
+        <div class="card" style="margin-top:24px;">
+          <h3>Preview Output</h3>
+          <pre id="output" class="terminal" style="min-height:200px;"></pre>
         </div>
       </div>
-      <div class="row iam-detection">
-        <div>
-          <label>Allowed events (newline separated)</label>
-          <textarea id="whitelist-events"></textarea>
-        </div>
-        <div>
-          <label>Disallowed events (newline separated)</label>
-          <textarea id="blacklist-events"></textarea>
-        </div>
-      </div>
-
-      <h3>Jira</h3>
-      <div class="row">
-        <div>
-          <label>Base URL</label>
-          <input id="jira-url" placeholder="https://example.atlassian.net" />
-        </div>
-        <div>
-          <label>Project Key</label>
-          <input id="jira-project" placeholder="OPS" />
-        </div>
-        <div>
-          <label>Issue Type</label>
-          <input id="jira-issue" placeholder="Task" />
-        </div>
-        <div>
-          <label>JIRA_EMAIL</label>
-          <input id="jira-email" placeholder="user@example.com" />
-        </div>
-      </div>
-
-      <h3>Credentials (optional)</h3>
-      <div class="row">
-        <div>
-          <label>AWS_ACCESS_KEY_ID</label>
-          <input id="aws-ak" placeholder="leave blank to omit" />
-        </div>
-        <div>
-          <label>AWS_SECRET_ACCESS_KEY</label>
-          <input id="aws-sk" placeholder="leave blank to omit" />
-        </div>
-        <div>
-          <label>AWS_SESSION_TOKEN</label>
-          <input id="aws-st" placeholder="leave blank to omit" />
-        </div>
-        <div>
-          <label>JIRA_TOKEN</label>
-          <input id="jira-token" placeholder="leave blank to omit" />
-        </div>
-      </div>
-
-      <pre id="output"></pre>
-    </div>
-  </main>
+    </main>
+  </div>
 
   <script>
     const output = document.getElementById("output");
     const err = document.getElementById("err");
+    const logoutBtn = document.getElementById("logout-btn");
     const token = localStorage.getItem("noclickops_token") || "";
+    const listEl = document.getElementById("scanners-list");
+    const formEl = document.getElementById("create-form");
+    
     applyDefaults();
+    loadScanners();
+
+    document.getElementById("open-create-btn").addEventListener("click", () => {
+      formEl.style.display = "block";
+      document.getElementById("open-create-btn").style.display = "none";
+      document.getElementById("scanners-list").style.display = "none";
+    });
+
+    document.getElementById("cancel-create-btn").addEventListener("click", () => {
+      formEl.style.display = "none";
+      document.getElementById("open-create-btn").style.display = "block";
+      document.getElementById("scanners-list").style.display = "grid";
+    });
+
+    async function loadScanners() {
+      try {
+        const list = await api("/v1/scanners");
+        if (!Array.isArray(list)) {
+          listEl.innerHTML = '<div style="color:red">Failed to load scanners</div>';
+          return;
+        }
+        if (list.length === 0) {
+          listEl.innerHTML = '<div style="color:var(--text-muted)">No scanners found. Create one to get started.</div>';
+          return;
+        }
+
+        // fetch health per scanner
+        const scanners = await Promise.all(list.map(async s => {
+          try {
+            const h = await api(`/v1/scanners/${encodeURIComponent(s.name)}/health`);
+            return { ...s, status: h.status || "unknown" };
+          } catch (_) {
+            return { ...s, status: "unknown" };
+          }
+        }));
+
+        listEl.innerHTML = scanners.map(s => {
+          const st = (s.status || "unknown").toLowerCase();
+          const statusClass = st === "running" ? "status-green" : st === "pending" ? "status-yellow" : "status-red";
+          return `
+          <div class="card" style="display:flex;justify-content:space-between;align-items:center;">
+            <div style="display:flex;align-items:center;gap:12px;">
+              <span class="status-dot ${statusClass}" title="${st}"></span>
+              <div>
+                <div style="font-weight:600;font-size:1.1rem;margin-bottom:4px;">
+                  <a href="/scanners/${s.name}" style="color:inherit;text-decoration:none;border-bottom:1px solid var(--primary);">${s.name}</a>
+                </div>
+                <div style="font-size:0.9rem;color:var(--text-muted);">
+                  ${s.cloud_provider.toUpperCase()} &bull; Created ${new Date(s.created_at).toLocaleDateString()}
+                </div>
+              </div>
+            </div>
+            <a href="/scanners/${s.name}" class="btn btn-secondary" style="font-size:0.9rem;">View Details</a>
+          </div>
+        `;
+        }).join("");
+      } catch (e) {
+        listEl.innerHTML = `<div style="color:red">Error: ${e}</div>`;
+      }
+    }
 
     function toggleFields() {
       const type = document.getElementById("scanner-type").value;
       document.querySelectorAll(".iam-only").forEach(el => {
-        el.style.display = type === "iam" ? "block" : "none";
+        el.style.display = type === "iam" ? "grid" : "none";
       });
       document.querySelectorAll(".kube-only").forEach(el => {
-        el.style.display = type === "kube-audit" ? "block" : "none";
+        el.style.display = type === "kube-audit" ? "grid" : "none";
       });
       document.querySelectorAll(".iam-detection").forEach(el => {
         el.style.display = type === "iam" ? "block" : "none";
-      });
-      document.querySelectorAll(".kube-detection").forEach(el => {
-        el.style.display = type === "kube-audit" ? "block" : "none";
       });
     }
     document.getElementById("scanner-type").addEventListener("change", toggleFields);
@@ -367,6 +358,15 @@
     function emptyToNull(v) { return v === "" ? null : v; }
 
     function buildPayload() {
+      const labelsRaw = parseLines("labels");
+      const labels = {};
+      labelsRaw.forEach(line => {
+        const parts = line.split("=");
+        if (parts.length >= 2) {
+          labels[parts[0].trim()] = parts.slice(1).join("=").trim();
+        }
+      });
+
       const cfg = {
         detection: {
           console_user_agents: parseLines("console-uas"),
@@ -425,6 +425,7 @@
         name: document.getElementById("sc-name").value.trim(),
         cloud_provider: document.getElementById("cloud-provider").value,
         config: cfg,
+        labels: labels,
         aws_access_key_id: emptyToNull((document.getElementById("aws-ak") || {}).value?.trim() || "") || undefined,
         aws_secret_access_key: emptyToNull((document.getElementById("aws-sk") || {}).value?.trim() || "") || undefined,
         aws_session_token: emptyToNull((document.getElementById("aws-st") || {}).value?.trim() || "") || undefined,
@@ -466,30 +467,20 @@
           body: JSON.stringify(payload),
         });
         output.textContent = "Created scanner:\n" + JSON.stringify(res, null, 2);
-        loadScanners();
+        // Redirect to dashboard after short delay
+        setTimeout(() => window.location.href = "/dashboard.html", 1500);
       } catch (e) {
         err.style.display = "block";
         err.textContent = e;
       }
     }
 
-    async function loadScanners() {
-      if (!token) redirectToLogin();
-      try {
-        const list = await api("/v1/scanners", { method: "GET" });
-        // Optionally show somewhere
-      } catch (e) {
-        console.warn(e);
-      }
-    }
-
     document.getElementById("create-btn").addEventListener("click", createScanner);
+    logoutBtn.addEventListener("click", redirectToLogin);
 
     if (!token) redirectToLogin();
-    loadScanners();
 
     function applyDefaults() {
-      // Defaults from noclickops-scanner/config.yaml
       document.getElementById("source").value = "cloudtrail";
       document.getElementById("cloud-provider").value = "aws";
       document.getElementById("region").value = "";
@@ -534,7 +525,7 @@
         "Deprovision*", "Deploy*", "Invoke*", "Restart*", "Reboot*", "Suspend*", "Resume*", "Publish*",
         "Unpublish*", "Rotate*"
       ].join("\n");
-      document.getElementById("blacklist-events").value = ["PutObject"].join("\n");
+      document.getElementById("blacklist-events").value = ["PutObject", "AssumeRole"].join("\n");
       document.getElementById("jira-url").value = "https://adecastro.atlassian.net";
       document.getElementById("jira-project").value = "NOCLICKOPS";
       document.getElementById("jira-issue").value = "Initiative";

@@ -7,19 +7,22 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
+
 	"net/http"
 	"net/url"
 	"os"
+
+	"crypto/sha256"
+	"encoding/hex"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
-
-	"crypto/sha256"
-	"encoding/hex"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -29,6 +32,7 @@ import (
 	"gorm.io/gorm"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
@@ -67,6 +71,7 @@ type Scanner struct {
 	Name          string          `json:"name" gorm:"uniqueIndex:idx_scanner_name_tenant"`
 	CloudProvider string          `json:"cloud_provider"`
 	ConfigJSON    json.RawMessage `json:"config_json" gorm:"type:jsonb"`
+	Labels        json.RawMessage `json:"labels" gorm:"type:jsonb"`
 	CreatedAt     time.Time       `json:"created_at"`
 	UpdatedAt     time.Time       `json:"updated_at"`
 	DeletedAt     gorm.DeletedAt  `json:"-" gorm:"index"`
@@ -172,17 +177,74 @@ func main() {
 	protected.GET("/scanners/:name/health", app.handleScannerHealth)
 	protected.GET("/scanners/:name/logs", app.handleScannerLogs)
 	protected.GET("/scanners/:name/findings", app.handleScannerFindings)
+	protected.GET("/scanners/:name/kube-map", app.handleScannerKubeMap)
 
 	addr := ":8080"
 	log.Printf("API listening on %s", addr)
 	if app.deploy == "kubernetes" {
 		go func() {
+			// Initial reconciliation
 			if err := app.ensureAllDeployments(); err != nil {
 				log.Printf("error ensuring deployments: %v", err)
 			}
+			// Periodic reconciliation loop
+			ticker := time.NewTicker(1 * time.Minute)
+			for range ticker.C {
+				if err := app.ensureAllDeployments(); err != nil {
+					log.Printf("error in reconciliation loop: %v", err)
+				}
+			}
 		}()
 	}
-	log.Fatal(router.Run(addr))
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: router,
+	}
+
+	lc := net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			var opErr error
+			if err := c.Control(func(fd uintptr) {
+				// Set SO_REUSEADDR to allow binding to an address in TIME_WAIT state.
+				// This is useful for frequent restarts during development (air).
+				opErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
+			}); err != nil {
+				return err
+			}
+			return opErr
+		},
+	}
+
+	ln, err := lc.Listen(context.Background(), "tcp", addr)
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+
+	go func() {
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen: %s\n", err)
+		}
+	}()
+
+	// Wait for interrupt signal to gracefully shutdown the server with
+	// a timeout of 5 seconds.
+	quit := make(chan os.Signal, 1)
+	// kill (no param) default send syscall.SIGTERM
+	// kill -2 is syscall.SIGINT
+	// kill -9 is syscall.SIGKILL but can't be caught, so don't need to add it
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down server...")
+
+	// The context is used to inform the server it has 2 seconds to finish
+	// the request it is currently handling
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatal("Server forced to shutdown: ", err)
+	}
+
+	log.Println("Server exiting")
 }
 
 func loadConfig() Config {
@@ -345,6 +407,7 @@ type createScannerRequest struct {
 	Name          string          `json:"name"`
 	CloudProvider string          `json:"cloud_provider"`
 	Config        json.RawMessage `json:"config"`
+	Labels        json.RawMessage `json:"labels,omitempty"`
 	AWSAccessKey  string          `json:"aws_access_key_id,omitempty"`
 	AWSSecretKey  string          `json:"aws_secret_access_key,omitempty"`
 	AWSSession    string          `json:"aws_session_token,omitempty"`
@@ -383,6 +446,7 @@ func (a *app) handleScannersPost(c *gin.Context) {
 		Name:          req.Name,
 		CloudProvider: provider,
 		ConfigJSON:    req.Config,
+		Labels:        req.Labels,
 	}
 	if err := a.db.WithContext(c.Request.Context()).Create(&scanner).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -439,6 +503,9 @@ func (a *app) handleScannerPut(c *gin.Context) {
 	}
 	if len(req.Config) > 0 {
 		updates["config_json"] = req.Config
+	}
+	if len(req.Labels) > 0 {
+		updates["labels"] = req.Labels
 	}
 
 	if err := a.db.WithContext(c.Request.Context()).
@@ -769,8 +836,117 @@ func (a *app) handleScannerFindings(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	// Filter findings based on blacklist to ensure UI doesn't show ignored events
+	// even if the scanner hasn't been restarted or has old findings in memory.
+	var findings []map[string]interface{}
+	if err := json.Unmarshal(bytes, &findings); err != nil {
+		// If parsing fails, just return raw bytes (fallback)
+		c.Data(http.StatusOK, "application/json", bytes)
+		return
+	}
+
+	// Parse config to get blacklist
+	var cfgMap map[string]interface{}
+	if len(scanner.ConfigJSON) > 0 {
+		_ = json.Unmarshal(scanner.ConfigJSON, &cfgMap)
+	}
+	if cfgMap == nil {
+		cfgMap = make(map[string]interface{})
+	}
+
+	// Get blacklist from config + defaults
+	blacklist := []string{
+		"AssumeRole",
+		"*AssumeRole*",
+		"Decrypt",
+		"Encrypt",
+		"GetCallerIdentity",
+		"BatchGetImage",
+		"FilterLogEvents",
+		"UpdateInstanceInformation",
+		"GenerateDataKey",
+		"CreateLogStream",
+	}
+	if bl, ok := cfgMap["blacklist_events"].([]interface{}); ok {
+		for _, v := range bl {
+			if s, ok := v.(string); ok {
+				blacklist = append(blacklist, s)
+			}
+		}
+	}
+
+	// Helper to check if string matches any blacklist pattern (glob or contains)
+	isBlacklisted := func(verb string) bool {
+		verbLower := strings.ToLower(verb)
+		for _, pattern := range blacklist {
+			patLower := strings.ToLower(pattern)
+			// Simple check: wildcard or substring
+			if strings.Contains(patLower, "*") || strings.Contains(patLower, "?") {
+				// Convert simple glob to regex: . -> \., * -> .*, ? -> .
+				// This is a rough approximation of the Rust glob logic
+				reStr := "^" + strings.ReplaceAll(strings.ReplaceAll(regexp.QuoteMeta(patLower), "\\*", ".*"), "\\?", ".") + "$"
+				if matched, _ := regexp.MatchString(reStr, verbLower); matched {
+					return true
+				}
+			} else if strings.Contains(verbLower, patLower) {
+				return true
+			}
+		}
+		return false
+	}
+
+	var filtered []map[string]interface{}
+	for _, f := range findings {
+		verb, _ := f["verb"].(string)
+		if verb != "" && isBlacklisted(verb) {
+			continue
+		}
+		filtered = append(filtered, f)
+	}
+
+	c.JSON(http.StatusOK, filtered)
+}
+
+func (a *app) handleScannerKubeMap(c *gin.Context) {
+	principal := c.MustGet("principal").(*User)
+	name := c.Param("name")
+	var scanner Scanner
+	if err := a.db.WithContext(c.Request.Context()).
+		Where("tenant_id = ? AND name = ?", principal.TenantID, name).
+		First(&scanner).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "scanner not found"})
+		return
+	}
+	if a.deploy != "kubernetes" || a.kube == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "kube map available only in kubernetes mode"})
+		return
+	}
+	ns := namespaceFor(principal.TenantID, scanner.Name)
+	pods, err := a.kube.CoreV1().Pods(ns).List(c.Request.Context(), metav1.ListOptions{
+		LabelSelector: "app=noclickops-scanner,scanner=" + sanitize(scanner.Name),
+	})
+	if err != nil || len(pods.Items) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "pod not found"})
+		return
+	}
+	podName := pods.Items[0].Name
+	raw := a.kube.CoreV1().RESTClient().
+		Get().
+		Namespace(ns).
+		Resource("pods").
+		Name(podName + ":8081").
+		SubResource("proxy").
+		Suffix("api/v1/kubernetes/map").
+		Do(c.Request.Context())
+	bytes, err := raw.Raw()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	c.Data(http.StatusOK, "application/json", bytes)
 }
+
 func namespaceFor(tenantID uint, scannerName string) string {
 	return fmt.Sprintf("scanner-%d-%s", tenantID, sanitize(scannerName))
 }
@@ -827,6 +1003,14 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 		"tenant":  fmt.Sprintf("%d", tenant.ID),
 		"cloud":   scanner.CloudProvider,
 	}
+	if len(scanner.Labels) > 0 {
+		var userLabels map[string]string
+		if err := json.Unmarshal(scanner.Labels, &userLabels); err == nil {
+			for k, v := range userLabels {
+				labels[k] = v
+			}
+		}
+	}
 
 	// Namespace
 	if _, err := a.kube.CoreV1().Namespaces().Get(ctx, ns, metav1.GetOptions{}); err != nil {
@@ -836,6 +1020,74 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 		}
 	}
 
+	// ServiceAccount
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "scanner",
+			Namespace: ns,
+			Labels:    labels,
+		},
+	}
+	if _, err := a.kube.CoreV1().ServiceAccounts(ns).Get(ctx, "scanner", metav1.GetOptions{}); err == nil {
+		_, _ = a.kube.CoreV1().ServiceAccounts(ns).Update(ctx, sa, metav1.UpdateOptions{})
+	} else {
+		_, _ = a.kube.CoreV1().ServiceAccounts(ns).Create(ctx, sa, metav1.CreateOptions{})
+	}
+
+	// NetworkPolicy (deny ingress from other namespaces)
+	np := &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "deny-external-ingress",
+			Namespace: ns,
+			Labels:    labels,
+		},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{
+				MatchLabels: labels,
+			},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+			Ingress: []networkingv1.NetworkPolicyIngressRule{
+				{
+					From: []networkingv1.NetworkPolicyPeer{
+						{
+							PodSelector: &metav1.LabelSelector{}, // Allow from all pods in this namespace
+						},
+					},
+				},
+			},
+		},
+	}
+	if _, err := a.kube.NetworkingV1().NetworkPolicies(ns).Get(ctx, "deny-external-ingress", metav1.GetOptions{}); err == nil {
+		_, _ = a.kube.NetworkingV1().NetworkPolicies(ns).Update(ctx, np, metav1.UpdateOptions{})
+	} else {
+		_, _ = a.kube.NetworkingV1().NetworkPolicies(ns).Create(ctx, np, metav1.CreateOptions{})
+	}
+
+	// Service
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "scanner",
+			Namespace: ns,
+			Labels:    labels,
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: labels,
+			Ports: []corev1.ServicePort{
+				{
+					Name:       "http",
+					Port:       80,
+					TargetPort: intstr.FromInt(8081),
+					Protocol:   corev1.ProtocolTCP,
+				},
+			},
+		},
+	}
+	if _, err := a.kube.CoreV1().Services(ns).Get(ctx, "scanner", metav1.GetOptions{}); err == nil {
+		_, _ = a.kube.CoreV1().Services(ns).Update(ctx, svc, metav1.UpdateOptions{})
+	} else {
+		_, _ = a.kube.CoreV1().Services(ns).Create(ctx, svc, metav1.CreateOptions{})
+	}
+
 	// ConfigMap with config.yaml
 	var cfg interface{}
 	var cfgMap map[string]interface{}
@@ -843,7 +1095,44 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 		_ = json.Unmarshal(scanner.ConfigJSON, &cfg)
 		_ = json.Unmarshal(scanner.ConfigJSON, &cfgMap)
 	}
-	yml, _ := yaml.Marshal(cfg)
+
+	// Ensure blacklist_events includes defaults to maintain consistency
+	// regardless of what the Rust binary does or if the UI stripped them.
+	defaults := []string{
+		"AssumeRole",
+		"*AssumeRole*",
+		"Decrypt",
+		"Encrypt",
+		"GetCallerIdentity",
+		"BatchGetImage",
+		"FilterLogEvents",
+		"UpdateInstanceInformation",
+		"GenerateDataKey",
+		"CreateLogStream",
+	}
+	if cfgMap == nil {
+		cfgMap = make(map[string]interface{})
+	}
+	if existingBL, ok := cfgMap["blacklist_events"].([]interface{}); ok {
+		// Merge defaults, avoiding duplicates
+		existingSet := make(map[string]bool)
+		for _, v := range existingBL {
+			if s, ok := v.(string); ok {
+				existingSet[s] = true
+			}
+		}
+		for _, d := range defaults {
+			if !existingSet[d] {
+				cfgMap["blacklist_events"] = append(cfgMap["blacklist_events"].([]interface{}), d)
+			}
+		}
+	} else {
+		// No blacklist present, set defaults
+		cfgMap["blacklist_events"] = defaults
+	}
+
+	// Use cfgMap for marshaling since we modified it
+	yml, _ := yaml.Marshal(cfgMap)
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "scanner-config",
@@ -861,7 +1150,16 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 	}
 
 	// Secret for credentials, if provided
+	secretName := "scanner-secret"
 	secretData := map[string][]byte{}
+
+	// Load existing secret data to preserve keys not being updated
+	if existing, err := a.kube.CoreV1().Secrets(ns).Get(ctx, secretName, metav1.GetOptions{}); err == nil {
+		if existing.Data != nil {
+			secretData = existing.Data
+		}
+	}
+
 	if req != nil {
 		if req.AWSAccessKey != "" {
 			secretData["AWS_ACCESS_KEY_ID"] = []byte(req.AWSAccessKey)
@@ -876,7 +1174,7 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 			secretData["JIRA_TOKEN"] = []byte(req.JiraToken)
 		}
 	}
-	secretName := "scanner-secret"
+
 	if len(secretData) > 0 {
 		log.Printf("applying secret for scanner %s in ns %s", scanner.Name, ns)
 		secret := &corev1.Secret{
@@ -891,11 +1189,6 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 			_, _ = a.kube.CoreV1().Secrets(ns).Update(ctx, secret, metav1.UpdateOptions{})
 		} else {
 			_, _ = a.kube.CoreV1().Secrets(ns).Create(ctx, secret, metav1.CreateOptions{})
-		}
-	} else {
-		// no new data provided; try to reuse existing secret
-		if existing, err := a.kube.CoreV1().Secrets(ns).Get(ctx, secretName, metav1.GetOptions{}); err == nil && len(existing.Data) > 0 {
-			secretData = existing.Data
 		}
 	}
 
@@ -944,6 +1237,7 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 	// Deployment
 	replicas := int32(1)
 	secretHash := hashMap(secretData)
+	configHash := fmt.Sprintf("%x", sha256.Sum256(yml))
 	deploy := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "scanner",
@@ -958,9 +1252,11 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 					Labels: labels,
 					Annotations: map[string]string{
 						"noclickops/secret-hash": secretHash,
+						"noclickops/config-hash": configHash,
 					},
 				},
 				Spec: corev1.PodSpec{
+					ServiceAccountName: "scanner",
 					Containers: []corev1.Container{
 						{
 							Name:            "scanner",

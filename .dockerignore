@@ -1,0 +1,8 @@
+.git
+.gitignore
+.envrc
+.air.toml
+tmp/
+vendor/
+Dockerfile
+run_dev.sh

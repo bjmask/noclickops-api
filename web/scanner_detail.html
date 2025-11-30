@@ -1,59 +1,152 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scanner Detail</title>
-    <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scanner Detail</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
   <style>
-    body { margin:0; font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#0f172a; color:#e5e7eb; padding:24px; }
-    .card { max-width: 900px; margin: 0 auto; background: rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); border-radius:14px; padding:16px; }
-    .muted { color:#9ca3af; }
-    .tag { display:inline-flex; padding:4px 8px; border-radius:999px; border:1px solid rgba(255,255,255,0.1); font-size:12px; }
-    .error { color:#f87171; }
-    pre, textarea { background:#0b1220; padding:12px; border-radius:10px; border:1px solid rgba(255,255,255,0.08); overflow:auto; color:#e5e7eb; width:100%; box-sizing:border-box; }
-    textarea { min-height: 220px; }
-    input { width:100%; padding:10px; border-radius:10px; border:1px solid rgba(255,255,255,0.1); background:#0f172a; color:#e5e7eb; }
-    label { display:block; margin:8px 0 4px; font-weight:600; }
-    .btn { display:inline-flex; align-items:center; justify-content:center; padding:10px 12px; border-radius:10px; border:none; cursor:pointer; font-weight:700; color:#0f172a; background:linear-gradient(135deg,#22d3ee,#7c3aed); }
-    .actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; }
-    .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:8px; }
-    .dot-green { background:#34d399; }
-    .dot-yellow { background:#fbbf24; }
-    .dot-red { background:#f87171; }
+    .masked-input {
+      -webkit-text-security: disc;
+      text-security: disc;
+      font-family: inherit;
+      font-size: inherit;
+      line-height: inherit;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-main);
+      border-radius: 4px;
+      padding: 8px 12px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .masked-input:focus {
+        outline: none;
+        border-color: var(--primary);
+    }
   </style>
 </head>
+
 <body>
-  <div class="card">
-    <h2 id="title">Scanner</h2>
-    <div class="muted"><span id="status-dot" class="dot dot-yellow"></span><span id="status">Loading...</span></div>
-    <div id="err" class="error" style="display:none;"></div>
+  <div class="layout-dashboard">
+    <aside>
+      <div class="brand">
+        <div class="brand-icon">N</div>
+        <span>NoClickOps</span>
+      </div>
 
-    <h3>Config (editable YAML)</h3>
-    <textarea id="config-text" placeholder="Scanner config YAML"></textarea>
-    <label>Region</label>
-    <input id="region" placeholder="us-west-2" />
-    <label>JIRA_EMAIL</label>
-    <input id="jira-email" placeholder="user@example.com" />
+      <div class="nav-group">
+        <div class="nav-label">Platform</div>
+        <a class="nav-link" href="/dashboard.html">Dashboard</a>
+        <a class="nav-link" href="/findings.html">Findings</a>
+        <a class="nav-link active" href="/scanners.html">Scanners</a>
+        <a class="nav-link" href="/docs.html">Docs</a>
+      </div>
 
-    <h3>Credentials (optional)</h3>
-    <label>AWS_ACCESS_KEY_ID</label>
-    <input id="aws-ak" placeholder="leave blank to keep existing" />
-    <label>AWS_SECRET_ACCESS_KEY</label>
-    <input id="aws-sk" placeholder="leave blank to keep existing" />
-    <label>AWS_SESSION_TOKEN</label>
-    <input id="aws-st" placeholder="leave blank to keep existing" />
-    <label>JIRA_TOKEN</label>
-    <input id="jira-token" placeholder="leave blank to keep existing" />
+      <div style="margin-top:auto;">
+        <button id="logout-btn" class="btn btn-secondary" style="width:100%;">Logout</button>
+      </div>
+    </aside>
 
-    <div class="actions">
-      <button class="btn" onclick="updateScanner()" style="background:linear-gradient(135deg,#34d399,#10b981);">Save changes</button>
-      <button class="btn" onclick="window.location.href='/dashboard.html'">Back to dashboard</button>
-      <button class="btn" id="follow-logs" style="background:linear-gradient(135deg,#22d3ee,#0ea5e9);">Follow logs</button>
-      <button class="btn" id="delete-btn" style="background:linear-gradient(135deg,#f87171,#ef4444);">Delete scanner</button>
-    </div>
-    <h3>Logs</h3>
-    <textarea id="log-box" readonly style="min-height:180px;"></textarea>
+    <main>
+      <div class="page-header">
+        <div>
+          <h1 class="page-title" id="title">Scanner</h1>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+            <span id="status-dot" class="status-dot status-yellow"></span>
+            <span id="status" class="text-muted">Loading...</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:12px;">
+          <button class="btn btn-danger" id="delete-btn">Delete Scanner</button>
+          <button class="btn btn-primary" onclick="updateScanner()">Save Changes</button>
+        </div>
+      </div>
+
+      <div class="error" id="err" style="display:none;margin-bottom:24px;"></div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+        <div class="card">
+          <h3 style="margin-bottom:20px;">Configuration</h3>
+          <div class="input-group">
+            <label class="input-label">Config (YAML)</label>
+            <textarea id="config-text" rows="12" style="font-family:monospace;"></textarea>
+          </div>
+          <div class="input-group">
+            <label class="input-label">Region</label>
+            <input id="region" placeholder="us-west-2" />
+          </div>
+          <div class="input-group">
+            <label class="input-label">JIRA_EMAIL</label>
+            <input id="jira-email" placeholder="user@example.com" />
+          </div>
+          <div class="input-group">
+            <label class="input-label">Labels (key=value)</label>
+            <textarea id="labels" rows="3" placeholder="env=prod&#10;team=platform"></textarea>
+          </div>
+        </div>
+
+        <div>
+          <div class="card">
+            <h3 style="margin-bottom:20px;">Credentials</h3>
+            <form autocomplete="off" onsubmit="return false;">
+                <div style="height:0;overflow:hidden;">
+                    <input type="text" name="fake_user_trap" tabindex="-1" />
+                    <input type="password" name="fake_pass_trap" tabindex="-1" />
+                </div>
+                <div class="input-group">
+                <label class="input-label">AWS_ACCESS_KEY_ID</label>
+                <input id="aws-ak" name="noclickops_ak_edit" autocomplete="off" placeholder="leave blank to keep existing" readonly onfocus="this.removeAttribute('readonly')" style="background-color:inherit;" />
+                </div>
+                <div class="input-group">
+                <label class="input-label"><span>AWS_</span><span>SECRET_</span><span>ACCESS_</span><span>KEY</span></label>
+                <textarea id="aws-sk" name="noclickops_sk_edit" placeholder="leave blank to keep existing" class="masked-input" rows="1" style="resize:none; overflow:hidden; white-space:nowrap; padding-top:10px;"></textarea>
+                </div>
+                <div class="input-group">
+                <label class="input-label">AWS_SESSION_TOKEN</label>
+                <textarea id="aws-st" name="noclickops_st_edit" placeholder="leave blank to keep existing" class="masked-input" rows="1" style="resize:none; overflow:hidden; white-space:nowrap; padding-top:10px;"></textarea>
+                </div>
+                <div class="input-group">
+                <label class="input-label">JIRA_TOKEN</label>
+                <input id="jira-token" name="noclickops_jira_edit" type="password" autocomplete="new-password" placeholder="leave blank to keep existing" readonly onfocus="this.removeAttribute('readonly')" style="background-color:inherit;" />
+                </div>
+            </form>
+          </div>
+
+          <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+              <h3 style="margin:0;">Logs</h3>
+              <button class="btn btn-secondary" id="follow-logs" style="padding:6px 12px;font-size:0.8rem;">Follow
+                Logs</button>
+            </div>
+            <textarea id="log-box" readonly class="terminal"
+              style="height:300px;width:100%;resize:vertical;"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="kube-map-card" style="margin-top:24px;display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+            <h3 style="margin:0;">Kube API Calls</h3>
+            <button class="btn btn-secondary" onclick="toggleKubeMap()" id="toggle-kube-map-btn">Expand</button>
+        </div>
+        <div id="kube-map-content" style="overflow-x:auto;display:none;margin-top:16px;">
+          <table class="table" style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr style="text-align:left;border-bottom:1px solid var(--border);">
+                <th style="padding:8px;cursor:pointer" onclick="sortTable(0)">User ↕</th>
+                <th style="padding:8px;cursor:pointer" onclick="sortTable(1)">Resource ↕</th>
+                <th style="padding:8px;cursor:pointer" onclick="sortTable(2)">Verb ↕</th>
+                <th style="padding:8px;cursor:pointer" onclick="sortTable(3)">Count ↕</th>
+              </tr>
+            </thead>
+            <tbody id="kube-map-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
   </div>
 
   <script>
@@ -65,6 +158,8 @@
     const errEl = document.getElementById("err");
     const logBox = document.getElementById("log-box");
     const followBtn = document.getElementById("follow-logs");
+    const logoutBtn = document.getElementById("logout-btn");
+
     let logController = null;
     let statusInterval = null;
     document.getElementById("title").textContent = `Scanner: ${name}`;
@@ -91,10 +186,9 @@
         const scanner = await api(`/v1/scanners/${encodeURIComponent(name)}`);
         if (scanner.config_json) {
           configText.value = JSON.stringify(scanner.config_json, null, 2);
-          // try to present YAML if available
           try {
             configText.value = jsyaml.dump(scanner.config_json);
-          } catch (_) {}
+          } catch (_) { }
         } else {
           configText.value = "";
         }
@@ -104,9 +198,70 @@
         if (scanner.config_json && scanner.config_json.jira && scanner.config_json.jira.email) {
           document.getElementById("jira-email").value = scanner.config_json.jira.email || "";
         }
+        
+        if (scanner.labels) {
+            const labels = typeof scanner.labels === 'string' ? JSON.parse(scanner.labels) : scanner.labels;
+            const lines = [];
+            for (const [k, v] of Object.entries(labels || {})) {
+                lines.push(`${k}=${v}`);
+            }
+            document.getElementById("labels").value = lines.join("\n");
+        }
+
+        if (scanner.cloud_provider === "aws" && scanner.config_json && (!scanner.config_json.source || scanner.config_json.source.includes("kubernetes"))) {
+            document.getElementById("kube-map-card").style.display = "block";
+            // Don't load automatically anymore, wait for expand
+        }
       } catch (e) {
         errEl.style.display = "block";
         errEl.textContent = e;
+      }
+    }
+
+    let kubeMapLoaded = false;
+    function toggleKubeMap() {
+        const content = document.getElementById("kube-map-content");
+        const btn = document.getElementById("toggle-kube-map-btn");
+        if (content.style.display === "none") {
+            content.style.display = "block";
+            btn.textContent = "Collapse";
+            if (!kubeMapLoaded) {
+                loadKubeMap();
+            }
+        } else {
+            content.style.display = "none";
+            btn.textContent = "Expand";
+        }
+    }
+
+    async function loadKubeMap() {
+      try {
+        const tbody = document.getElementById("kube-map-body");
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;">Loading...</td></tr>';
+        
+        const map = await api(`/v1/scanners/${encodeURIComponent(name)}/kube-map`);
+        tbody.innerHTML = "";
+        
+        // map is user -> resource -> verb -> count
+        for (const [user, resources] of Object.entries(map)) {
+            for (const [resource, verbs] of Object.entries(resources)) {
+                for (const [verb, count] of Object.entries(verbs)) {
+                    const tr = document.createElement("tr");
+                    tr.style.borderBottom = "1px solid rgba(255,255,255,0.05)";
+                    tr.innerHTML = `
+                        <td style="padding:8px;">${user}</td>
+                        <td style="padding:8px;">${resource}</td>
+                        <td style="padding:8px;">${verb}</td>
+                        <td style="padding:8px;">${count}</td>
+                    `;
+                    tbody.appendChild(tr);
+                }
+            }
+        }
+        kubeMapLoaded = true;
+      } catch (e) {
+        console.error("failed to load kube map", e);
+        document.getElementById("kube-map-body").innerHTML = `<tr><td colspan="4" style="color:red;text-align:center;padding:20px;">Failed to load data: ${e}</td></tr>`;
       }
     }
 
@@ -115,10 +270,10 @@
         const health = await api(`/v1/scanners/${encodeURIComponent(name)}/health`);
         const st = (health.status || 'unknown').toLowerCase();
         statusEl.textContent = `Status: ${st}`;
-        statusDot.className = "dot " + (st === "running" ? "dot-green" : st === "pending" ? "dot-yellow" : "dot-red");
+        statusDot.className = "status-dot " + (st === "running" ? "status-green" : st === "pending" ? "status-yellow" : "status-red");
       } catch (e) {
         statusEl.textContent = `Status: error`;
-        statusDot.className = "dot dot-red";
+        statusDot.className = "status-dot status-red";
       }
     }
 
@@ -138,7 +293,7 @@
       if (logController) {
         logController.abort();
         logController = null;
-        followBtn.textContent = "Follow logs";
+        followBtn.textContent = "Follow Logs";
         return;
       }
       logController = new AbortController();
@@ -167,7 +322,7 @@
       } finally {
         if (logController) {
           logController = null;
-          followBtn.textContent = "Follow logs";
+          followBtn.textContent = "Follow Logs";
         }
       }
     }
@@ -183,10 +338,20 @@
             cfg = JSON.parse(configText.value);
           }
         }
+        const labelsRaw = document.getElementById("labels").value.split("\n").map(s => s.trim()).filter(Boolean);
+        const labels = {};
+        labelsRaw.forEach(line => {
+          const parts = line.split("=");
+          if (parts.length >= 2) {
+            labels[parts[0].trim()] = parts.slice(1).join("=").trim();
+          }
+        });
+
         const cfgRegion = document.getElementById("region").value.trim();
         const body = {
           config: cfg,
           region: cfgRegion || undefined,
+          labels: labels,
           aws_access_key_id: document.getElementById("aws-ak").value.trim() || undefined,
           aws_secret_access_key: document.getElementById("aws-sk").value.trim() || undefined,
           aws_session_token: document.getElementById("aws-st").value.trim() || undefined,
@@ -206,6 +371,8 @@
     }
 
     followBtn.addEventListener("click", streamLogs);
+    logoutBtn.addEventListener("click", redirectToLogin);
+
     document.getElementById("delete-btn").addEventListener("click", async () => {
       if (!confirm("Delete this scanner?")) return;
       try {
@@ -216,7 +383,32 @@
         errEl.textContent = e;
       }
     });
+
+    function sortTable(n) {
+      const table = document.querySelector("#kube-map-body").parentNode;
+      const tbody = table.querySelector("tbody");
+      const rows = Array.from(tbody.rows);
+      let dir = table.getAttribute("data-sort-dir") === "asc" ? "desc" : "asc";
+      table.setAttribute("data-sort-dir", dir);
+
+      rows.sort((a, b) => {
+        let x = a.getElementsByTagName("TD")[n].textContent.toLowerCase();
+        let y = b.getElementsByTagName("TD")[n].textContent.toLowerCase();
+        // Check if numeric
+        if (!isNaN(x) && !isNaN(y)) {
+            x = parseFloat(x);
+            y = parseFloat(y);
+        }
+        if (x < y) return dir === "asc" ? -1 : 1;
+        if (x > y) return dir === "asc" ? 1 : -1;
+        return 0;
+      });
+
+      rows.forEach(row => tbody.appendChild(row));
+    }
+
     if (!token) redirectToLogin(); else load();
   </script>
 </body>
+
 </html>

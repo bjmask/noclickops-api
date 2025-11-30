@@ -5,187 +5,60 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NoClickOps Dashboard</title>
-  <style>
-    :root {
-      --bg: #0f172a;
-      --panel: #111827;
-      --muted: #9ca3af;
-      --accent: #22d3ee;
-      --accent2: #7c3aed;
-      --card: #0b1220;
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    body {
-      margin: 0;
-      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: var(--bg);
-      color: #e5e7eb;
-      min-height: 100vh;
-      display: grid;
-      grid-template-columns: 280px 1fr;
-    }
-
-    aside {
-      background: var(--panel);
-      border-right: 1px solid rgba(255, 255, 255, 0.05);
-      padding: 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    main {
-      padding: 24px;
-      background: radial-gradient(circle at 20% 20%, rgba(34, 211, 238, 0.07), transparent 25%),
-        radial-gradient(circle at 80% 10%, rgba(124, 58, 237, 0.07), transparent 30%),
-        var(--bg);
-    }
-
-    .brand {
-      font-weight: 800;
-      letter-spacing: 0.3px;
-    }
-
-    .nav-group {
-      margin-top: 12px;
-    }
-
-    .nav-title {
-      color: var(--muted);
-      font-size: 12px;
-      text-transform: uppercase;
-      margin-bottom: 6px;
-    }
-
-    .nav-link {
-      display: block;
-      padding: 10px 12px;
-      border-radius: 10px;
-      color: #e5e7eb;
-      text-decoration: none;
-    }
-
-    .nav-link:hover {
-      background: rgba(255, 255, 255, 0.04);
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 10px 12px;
-      border-radius: 10px;
-      border: none;
-      cursor: pointer;
-      font-weight: 700;
-      color: #0f172a;
-      background: linear-gradient(135deg, var(--accent), var(--accent2));
-    }
-
-    .section {
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid rgba(255, 255, 255, 0.05);
-      border-radius: 14px;
-      padding: 16px;
-      margin-bottom: 16px;
-    }
-
-    h2 {
-      margin: 0 0 8px;
-    }
-
-    .muted {
-      color: var(--muted);
-    }
-
-    .list {
-      display: grid;
-      gap: 10px;
-    }
-
-    .item {
-      padding: 12px;
-      border-radius: 10px;
-      background: rgba(0, 0, 0, 0.2);
-      border: 1px solid rgba(255, 255, 255, 0.05);
-    }
-
-    .tag {
-      display: inline-flex;
-      padding: 4px 10px;
-      border-radius: 999px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      font-size: 12px;
-    }
-
-    .error {
-      color: #f87171;
-      font-size: 13px;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      color: #e5e7eb;
-    }
-
-    th,
-    td {
-      padding: 8px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-      text-align: left;
-    }
-
-    th {
-      cursor: pointer;
-      color: #cbd5e1;
-    }
-
-    .nowrap {
-      white-space: nowrap;
-    }
-  </style>
+  <link rel="stylesheet" href="/static/style.css">
 </head>
 
 <body>
-  <aside>
-    <div class="brand">NoClickOps</div>
-    <div class="nav-group">
-      <div class="nav-title">Navigation</div>
-      <a class="nav-link" href="#scanners">Scanners</a>
-      <a class="nav-link" href="#users">Users</a>
-      <a class="nav-link" href="/findings.html">Findings</a>
-      <a class="nav-link" href="/docs.html">Docs</a>
-      <button class="btn" id="logout-btn">Logout</button>
-    </div>
-  </aside>
-  <main>
-    <div class="section">
-      <h2 id="tenant-name">Tenant</h2>
-      <div class="muted" id="tenant-id"></div>
-    </div>
-    <div class="section" id="scanners">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
-        <h2>Scanners</h2>
-        <div style="display:flex;gap:10px;align-items:center;">
-          <button class="btn" style="background:linear-gradient(135deg,#34d399,#10b981);"
-            onclick="window.location.href='/scanners.html'">Add scanner</button>
-          <span class="muted" id="scanner-count">0</span>
-        </div>
+  <div class="layout-dashboard">
+    <aside>
+      <div class="brand">
+        <div class="brand-icon">N</div>
+        <span>NoClickOps</span>
       </div>
-      <div class="list" id="scanner-list"></div>
-    </div>
-    <div class="section" id="users">
-      <h2>Users</h2>
-      <div class="muted">User listing not implemented yet.</div>
-    </div>
 
-    <div class="error" id="err" style="display:none;"></div>
-  </main>
+      <div class="nav-group">
+        <div class="nav-label">Platform</div>
+        <a class="nav-link active" href="/dashboard.html">Dashboard</a>
+        <a class="nav-link" href="/findings.html">Findings</a>
+        <a class="nav-link" href="/scanners.html">Scanners</a>
+        <a class="nav-link" href="/docs.html">Docs</a>
+      </div>
+
+      <div style="margin-top:auto;">
+        <button id="logout-btn" class="btn btn-secondary" style="width:100%;">Logout</button>
+      </div>
+    </aside>
+
+    <main>
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Dashboard</h1>
+          <p class="page-desc" id="tenant-name">Loading tenant...</p>
+        </div>
+        <div class="tag" id="tenant-id"></div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+          <h2 style="margin:0;">Scanners</h2>
+          <div style="display:flex;gap:12px;align-items:center;">
+            <input id="filter-input" placeholder="Filter scanners..." style="padding:8px;border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--text-main);" />
+            <span class="text-muted" id="scanner-count">0 scanners</span>
+            <button class="btn btn-primary" onclick="window.location.href='/scanners.html'">Add Scanner</button>
+          </div>
+        </div>
+
+        <div id="scanner-list" style="display:grid;gap:12px;"></div>
+      </div>
+
+      <div class="card">
+        <h2>Users</h2>
+        <p class="text-muted">User management is coming soon.</p>
+      </div>
+
+      <div class="error" id="err" style="display:none;color:var(--accent-danger);margin-top:20px;"></div>
+    </main>
+  </div>
 
   <script>
     let token = localStorage.getItem("noclickops_token") || "";
@@ -194,7 +67,10 @@
     const tenantId = document.getElementById("tenant-id");
     const scannerList = document.getElementById("scanner-list");
     const scannerCount = document.getElementById("scanner-count");
+    const filterInput = document.getElementById("filter-input");
     const logoutBtn = document.getElementById("logout-btn");
+
+    let allScanners = [];
 
     function api(path, opts = {}) {
       const headers = opts.headers || {};
@@ -234,16 +110,12 @@
         clearError();
         const me = await api("/v1/me");
         tenantName.textContent = me.tenant_name;
-        tenantId.textContent = "Tenant ID: " + me.tenant_id;
+        tenantId.textContent = "ID: " + me.tenant_id;
       } catch (e) {
         showError(e);
         setTimeout(redirectToLogin, 500);
       }
     }
-
-
-
-
 
     async function loadScanners() {
       if (!token) return;
@@ -251,7 +123,7 @@
         clearError();
         const list = await api("/v1/scanners");
         // fetch health per scanner
-        const withHealth = await Promise.all(list.map(async s => {
+        allScanners = await Promise.all(list.map(async s => {
           try {
             const h = await api(`/v1/scanners/${encodeURIComponent(s.name)}/health`);
             return { ...s, status: h.status || "unknown" };
@@ -259,27 +131,71 @@
             return { ...s, status: "unknown" };
           }
         }));
-        scannerCount.textContent = withHealth.length;
-        scannerList.innerHTML = withHealth.map(s => {
-          const st = (s.status || "unknown").toLowerCase();
-          const dotClass = st === "running" ? "dot dot-green" : st === "pending" ? "dot dot-yellow" : "dot dot-red";
-          return `
-          <a class="item" style="color:inherit;text-decoration:none;display:block;" href="/scanners/${encodeURIComponent(s.name)}">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <div><strong>${s.name}</strong> <span class="${dotClass}" style="width:8px;height:8px;display:inline-block;border-radius:50%;"></span><span class="muted">${st}</span></div>
-              <span class="tag">${s.cloud_provider.toUpperCase()}</span>
-            </div>
-            <div class="muted">id: ${s.id}</div>
-          </a>
-        `;
-        }).join("");
+        renderScanners();
       } catch (e) {
         showError(e);
       }
     }
 
-    logoutBtn.addEventListener("click", redirectToLogin);
+    function renderScanners() {
+        const term = filterInput.value.toLowerCase();
+        const filtered = allScanners.filter(s => {
+            if (!term) return true;
+            if (s.name.toLowerCase().includes(term)) return true;
+            if (String(s.id).includes(term)) return true;
+            if (s.cloud_provider.toLowerCase().includes(term)) return true;
+            // Check labels
+            if (s.labels) {
+                const labels = typeof s.labels === 'string' ? JSON.parse(s.labels) : s.labels;
+                for (const [k, v] of Object.entries(labels || {})) {
+                    if (k.toLowerCase().includes(term) || v.toLowerCase().includes(term)) return true;
+                }
+            }
+            return false;
+        });
 
+        scannerCount.textContent = `${filtered.length} scanner(s)`;
+
+        if (filtered.length === 0) {
+          scannerList.innerHTML = `<div class="text-muted text-center" style="padding:20px;">No scanners found matching filter.</div>`;
+          return;
+        }
+
+        scannerList.innerHTML = filtered.map(s => {
+          const st = (s.status || "unknown").toLowerCase();
+          const statusClass = st === "running" ? "status-green" : st === "pending" ? "status-yellow" : "status-red";
+          
+          let labelHtml = "";
+          if (s.labels) {
+              const labels = typeof s.labels === 'string' ? JSON.parse(s.labels) : s.labels;
+              labelHtml = Object.entries(labels || {}).map(([k, v]) =>
+                  `<span class="tag" style="font-size:0.7rem;margin-left:4px;">${k}=${v}</span>`
+              ).join("");
+          }
+
+          return `
+          <a href="/scanners/${encodeURIComponent(s.name)}" style="display:block;text-decoration:none;">
+            <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:var(--radius-sm);padding:16px;display:flex;justify-content:space-between;align-items:center;transition:background 0.2s;">
+              <div style="display:flex;align-items:center;gap:12px;">
+                <span class="status-dot ${statusClass}"></span>
+                <div>
+                  <div style="font-weight:600;color:var(--text-main);display:flex;align-items:center;">
+                    ${s.name}
+                    ${labelHtml}
+                  </div>
+                  <div class="text-muted" style="font-size:0.8rem;">ID: ${s.id}</div>
+                </div>
+              </div>
+              <span class="tag">${s.cloud_provider.toUpperCase()}</span>
+            </div>
+          </a>
+        `;
+        }).join("");
+    }
+
+    filterInput.addEventListener("input", renderScanners);
+
+    logoutBtn.addEventListener("click", redirectToLogin);
 
     loadMe().then(loadScanners);
   </script>

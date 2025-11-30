@@ -5,4 +5,4 @@ database_url: "postgres://postgres:@localhost:5432/noclickops?sslmode=disable"
 jwt_secret: "change-me"
 
 deployment_type: "kubernetes"
-scanner_image: "noclickops-scanner:2025-11-29-d62555"
+scanner_image: "noclickops-scanner:2025-11-30-a6c55c"
