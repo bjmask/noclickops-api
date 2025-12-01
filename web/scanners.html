@@ -111,9 +111,39 @@
                 <label class="input-label">Kinesis Stream (if kinesis)</label>
                 <input id="kinesis-stream" placeholder="stream-name" />
               </div>
-              <div class="input-group">
+              <div class="input-group iam-only">
                 <label class="input-label">AWS Account ID (optional)</label>
                 <input id="aws-account" placeholder="123456789012" />
+              </div>
+            </div>
+
+            <div class="gcp-only" style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:16px;display:none;">
+              <div class="input-group">
+                <label class="input-label">Source</label>
+                <select id="gcp-source">
+                  <option value="gcp-cloud-logging">gcp-cloud-logging</option>
+                  <option value="gcp-pubsub">gcp-pubsub</option>
+                </select>
+              </div>
+              <div class="input-group">
+                <label class="input-label">Project ID</label>
+                <input id="gcp-project" placeholder="my-gcp-project" />
+              </div>
+              <div class="gcp-pubsub-only input-group">
+                <label class="input-label">Pub/Sub Subscription</label>
+                <input id="gcp-subscription" placeholder="audit" />
+              </div>
+              <div class="gcp-pubsub-only input-group">
+                <label class="input-label">Pub/Sub Max Messages</label>
+                <input id="gcp-max-messages" type="number" min="1" max="1000" placeholder="1000" />
+              </div>
+              <div class="gcp-pubsub-only input-group">
+                <label class="input-label">Pub/Sub Poll (ms)</label>
+                <input id="gcp-poll-ms" type="number" min="0" step="50" placeholder="0" />
+              </div>
+              <div class="gcp-pubsub-only input-group">
+                <label class="input-label">Pub/Sub Workers</label>
+                <input id="gcp-workers" type="number" min="1" placeholder="1" />
               </div>
             </div>
 
@@ -232,17 +262,21 @@
             </div>
 
             <form autocomplete="off" onsubmit="return false;">
-              <div class="input-group">
+              <div class="input-group aws-creds">
                 <label class="input-label">AWS_ACCESS_KEY_ID</label>
                 <input id="aws-ak" name="noclickops_ak_field" placeholder="optional" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" style="background-color:inherit;" />
               </div>
-              <div class="input-group">
+              <div class="input-group aws-creds">
                 <label class="input-label">AWS_SECRET_ACCESS_KEY</label>
                 <input id="aws-ak" name="noclickops_ak_field" placeholder="optional" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" style="background-color:inherit;" />
               </div>
-              <div class="input-group">
+              <div class="input-group aws-creds">
                 <label class="input-label">AWS_SESSION_TOKEN</label>
                 <textarea id="aws-st" name="noclickops_st_field" placeholder="optional" class="masked-input" rows="1" style="resize:none; overflow:hidden; white-space:nowrap; padding-top:10px;"></textarea>
+              </div>
+              <div class="input-group gcp-creds" style="display:none;">
+                <label class="input-label">GCP_CREDENTIALS_JSON</label>
+                <textarea id="gcp-creds-json" rows="6" placeholder='{ "type": "service_account", ... }'></textarea>
               </div>
             </form>
           </div>
@@ -328,18 +362,37 @@
     }
 
     function toggleFields() {
-      const type = document.getElementById("scanner-type").value;
+      const provider = document.getElementById("cloud-provider").value;
+      let type = document.getElementById("scanner-type").value;
+      if (provider === "gcp" && type === "iam") {
+        type = "kube-audit";
+        document.getElementById("scanner-type").value = "kube-audit";
+      }
       document.querySelectorAll(".iam-only").forEach(el => {
-        el.style.display = type === "iam" ? "grid" : "none";
+        el.style.display = (type === "iam" && provider === "aws") ? "grid" : "none";
       });
       document.querySelectorAll(".kube-only").forEach(el => {
         el.style.display = type === "kube-audit" ? "grid" : "none";
       });
       document.querySelectorAll(".iam-detection").forEach(el => {
-        el.style.display = type === "iam" ? "block" : "none";
+        el.style.display = (type === "iam" && provider === "aws") ? "block" : "none";
+      });
+      document.querySelectorAll(".gcp-only").forEach(el => {
+        el.style.display = provider === "gcp" ? "grid" : "none";
+      });
+      document.querySelectorAll(".gcp-pubsub-only").forEach(el => {
+        el.style.display = provider === "gcp" && document.getElementById("gcp-source").value === "gcp-pubsub" ? "block" : "none";
+      });
+      document.querySelectorAll(".aws-creds").forEach(el => {
+        el.style.display = provider === "aws" ? "block" : "none";
+      });
+      document.querySelectorAll(".gcp-creds").forEach(el => {
+        el.style.display = provider === "gcp" ? "block" : "none";
       });
     }
     document.getElementById("scanner-type").addEventListener("change", toggleFields);
+    document.getElementById("cloud-provider").addEventListener("change", toggleFields);
+    document.getElementById("gcp-source").addEventListener("change", toggleFields);
     toggleFields();
 
     function parseLines(id) {
@@ -394,7 +447,25 @@
       if (!isNaN(lookbackHours)) cfg.lookback_hours = lookbackHours;
       if (!isNaN(pollMs)) cfg.poll_milliseconds = pollMs;
 
-      if (scannerType === "iam") {
+      const provider = document.getElementById("cloud-provider").value;
+      if (provider === "gcp") {
+        const gcpSource = document.getElementById("gcp-source").value;
+        cfg.source = gcpSource === "gcp-cloud-logging" ? "gcp-kube-audit" : "gcp-pubsub";
+        const projectId = emptyToNull(document.getElementById("gcp-project").value.trim());
+        const subscription = emptyToNull(document.getElementById("gcp-subscription").value.trim());
+        const maxMessages = parseInt(document.getElementById("gcp-max-messages").value, 10);
+        const gcpPoll = parseInt(document.getElementById("gcp-poll-ms").value, 10);
+        const workers = parseInt(document.getElementById("gcp-workers").value, 10);
+        cfg.gcp = {
+          project_id: projectId,
+          pubsub: gcpSource === "gcp-pubsub" ? {
+            subscription_id: subscription,
+            pubsub_max_messages: isNaN(maxMessages) ? undefined : maxMessages,
+            poll_milliseconds: isNaN(gcpPoll) ? undefined : gcpPoll,
+            workers: isNaN(workers) ? undefined : workers,
+          } : undefined,
+        };
+      } else if (scannerType === "iam") {
         cfg.source = document.getElementById("source").value;
         cfg.region = region;
         cfg.kinesis_stream = emptyToNull(document.getElementById("kinesis-stream").value.trim());
@@ -429,6 +500,7 @@
         aws_access_key_id: emptyToNull((document.getElementById("aws-ak") || {}).value?.trim() || "") || undefined,
         aws_secret_access_key: emptyToNull((document.getElementById("aws-sk") || {}).value?.trim() || "") || undefined,
         aws_session_token: emptyToNull((document.getElementById("aws-st") || {}).value?.trim() || "") || undefined,
+        gcp_credentials_json: provider === "gcp" ? emptyToNull((document.getElementById("gcp-creds-json") || {}).value?.trim() || "") || undefined : undefined,
         jira_token: emptyToNull((document.getElementById("jira-token") || {}).value?.trim() || "") || undefined,
       };
     }
@@ -483,6 +555,7 @@
     function applyDefaults() {
       document.getElementById("source").value = "cloudtrail";
       document.getElementById("cloud-provider").value = "aws";
+      document.getElementById("gcp-source").value = "gcp-cloud-logging";
       document.getElementById("region").value = "";
       document.getElementById("kube-log-prefix").value = "kube-apiserver-audit";
       document.getElementById("kube-verbs").value = [

@@ -45,6 +45,7 @@ type Config struct {
 	JWTSecret        string `yaml:"jwt_secret"`
 	DeploymentType   string `yaml:"deployment_type"` // "process" or "docker"
 	ScannerImage     string `yaml:"scanner_image"`
+	MountADCFromHost bool   `yaml:"mountApplicationDefaultCredentialsFromHost"`
 }
 
 type Tenant struct {
@@ -85,6 +86,7 @@ type app struct {
 	deploy    string
 	kube      *kubernetes.Clientset
 	image     string
+	mountADC  bool
 }
 
 func main() {
@@ -119,7 +121,7 @@ func main() {
 		log.Fatalf("migration failed: %v", err)
 	}
 
-	app := &app{db: db, jwtSecret: []byte(jwtSecret), procs: make(map[uint]*exec.Cmd), deploy: strings.ToLower(cfg.DeploymentType), image: scannerImage}
+	app := &app{db: db, jwtSecret: []byte(jwtSecret), procs: make(map[uint]*exec.Cmd), deploy: strings.ToLower(cfg.DeploymentType), image: scannerImage, mountADC: cfg.MountADCFromHost}
 
 	if app.deploy == "" {
 		app.deploy = "process"
@@ -177,7 +179,9 @@ func main() {
 	protected.GET("/scanners/:name/health", app.handleScannerHealth)
 	protected.GET("/scanners/:name/logs", app.handleScannerLogs)
 	protected.GET("/scanners/:name/findings", app.handleScannerFindings)
-	protected.GET("/scanners/:name/kube-map", app.handleScannerKubeMap)
+	protected.GET("/scanners/:name/map", app.handleScannerMap)
+	// backward compatibility
+	protected.GET("/scanners/:name/kube-map", app.handleScannerMap)
 
 	addr := ":8080"
 	log.Printf("API listening on %s", addr)
@@ -404,15 +408,16 @@ func (a *app) handleCreateTenant(c *gin.Context) {
 }
 
 type createScannerRequest struct {
-	Name          string          `json:"name"`
-	CloudProvider string          `json:"cloud_provider"`
-	Config        json.RawMessage `json:"config"`
-	Labels        json.RawMessage `json:"labels,omitempty"`
-	AWSAccessKey  string          `json:"aws_access_key_id,omitempty"`
-	AWSSecretKey  string          `json:"aws_secret_access_key,omitempty"`
-	AWSSession    string          `json:"aws_session_token,omitempty"`
-	JiraToken     string          `json:"jira_token,omitempty"`
-	JiraEmail     string          `json:"jira_email,omitempty"`
+	Name           string          `json:"name"`
+	CloudProvider  string          `json:"cloud_provider"`
+	Config         json.RawMessage `json:"config"`
+	Labels         json.RawMessage `json:"labels,omitempty"`
+	AWSAccessKey   string          `json:"aws_access_key_id,omitempty"`
+	AWSSecretKey   string          `json:"aws_secret_access_key,omitempty"`
+	AWSSession     string          `json:"aws_session_token,omitempty"`
+	JiraToken      string          `json:"jira_token,omitempty"`
+	JiraEmail      string          `json:"jira_email,omitempty"`
+	GCPCredentials string          `json:"gcp_credentials_json,omitempty"`
 }
 
 func (a *app) handleScannersGet(c *gin.Context) {
@@ -908,7 +913,7 @@ func (a *app) handleScannerFindings(c *gin.Context) {
 	c.JSON(http.StatusOK, filtered)
 }
 
-func (a *app) handleScannerKubeMap(c *gin.Context) {
+func (a *app) handleScannerMap(c *gin.Context) {
 	principal := c.MustGet("principal").(*User)
 	name := c.Param("name")
 	var scanner Scanner
@@ -918,33 +923,46 @@ func (a *app) handleScannerKubeMap(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "scanner not found"})
 		return
 	}
-	if a.deploy != "kubernetes" || a.kube == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "kube map available only in kubernetes mode"})
+	if a.deploy == "kubernetes" && a.kube != nil {
+		ns := namespaceFor(principal.TenantID, scanner.Name)
+		pods, err := a.kube.CoreV1().Pods(ns).List(c.Request.Context(), metav1.ListOptions{
+			LabelSelector: "app=noclickops-scanner,scanner=" + sanitize(scanner.Name),
+		})
+		if err != nil || len(pods.Items) == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"error": "pod not found"})
+			return
+		}
+		podName := pods.Items[0].Name
+		raw := a.kube.CoreV1().RESTClient().
+			Get().
+			Namespace(ns).
+			Resource("pods").
+			Name(podName + ":8081").
+			SubResource("proxy").
+			Suffix("api/v1/map").
+			Do(c.Request.Context())
+		bytes, err := raw.Raw()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.Data(http.StatusOK, "application/json", bytes)
 		return
 	}
-	ns := namespaceFor(principal.TenantID, scanner.Name)
-	pods, err := a.kube.CoreV1().Pods(ns).List(c.Request.Context(), metav1.ListOptions{
-		LabelSelector: "app=noclickops-scanner,scanner=" + sanitize(scanner.Name),
-	})
-	if err != nil || len(pods.Items) == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "pod not found"})
+
+	// process/development mode: attempt local HTTP fetch from scanner port
+	resp, err := http.Get("http://127.0.0.1:8081/api/v1/map")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "map unavailable (process mode): " + err.Error()})
 		return
 	}
-	podName := pods.Items[0].Name
-	raw := a.kube.CoreV1().RESTClient().
-		Get().
-		Namespace(ns).
-		Resource("pods").
-		Name(podName + ":8081").
-		SubResource("proxy").
-		Suffix("api/v1/kubernetes/map").
-		Do(c.Request.Context())
-	bytes, err := raw.Raw()
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.Data(http.StatusOK, "application/json", bytes)
+	c.Data(resp.StatusCode, "application/json", body)
 }
 
 func namespaceFor(tenantID uint, scannerName string) string {
@@ -1173,6 +1191,9 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 		if req.JiraToken != "" {
 			secretData["JIRA_TOKEN"] = []byte(req.JiraToken)
 		}
+		if req.GCPCredentials != "" {
+			secretData["GCP_CREDENTIALS_JSON"] = []byte(req.GCPCredentials)
+		}
 	}
 
 	if len(secretData) > 0 {
@@ -1238,6 +1259,12 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 	replicas := int32(1)
 	secretHash := hashMap(secretData)
 	configHash := fmt.Sprintf("%x", sha256.Sum256(yml))
+	hostADCPath := ""
+	if a.mountADC && scanner.CloudProvider == "gcp" {
+		// When using kind extraMounts, the ADC file is mounted into the node at this path.
+		hostADCPath = "/var/secrets/adc.json"
+	}
+
 	deploy := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "scanner",
@@ -1263,9 +1290,17 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 							Image:           a.image,
 							ImagePullPolicy: "Never",
 							Args:            []string{"--config", "/config/config.yaml"},
-							VolumeMounts: []corev1.VolumeMount{
-								{Name: "config", MountPath: "/config"},
-							},
+							VolumeMounts: func() []corev1.VolumeMount {
+								mounts := []corev1.VolumeMount{{Name: "config", MountPath: "/config"}}
+								if hostADCPath != "" {
+									mounts = append(mounts, corev1.VolumeMount{
+										Name:      "gcp-adc-host",
+										MountPath: "/var/secrets/adc.json",
+										ReadOnly:  true,
+									})
+								}
+								return mounts
+							}(),
 							EnvFrom: func() []corev1.EnvFromSource {
 								if len(secretData) == 0 {
 									return nil
@@ -1286,6 +1321,12 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 										corev1.EnvVar{Name: "AWS_DEFAULT_REGION", Value: regionEnv},
 									)
 								}
+								if hostADCPath != "" {
+									envs = append(envs, corev1.EnvVar{
+										Name:  "GOOGLE_APPLICATION_CREDENTIALS",
+										Value: "/var/secrets/adc.json",
+									})
+								}
 								if jiraEmail != "" {
 									envs = append(envs, corev1.EnvVar{Name: "JIRA_EMAIL", Value: jiraEmail})
 								}
@@ -1303,16 +1344,31 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 							},
 						},
 					},
-					Volumes: []corev1.Volume{
-						{
-							Name: "config",
-							VolumeSource: corev1.VolumeSource{
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{Name: "scanner-config"},
+					Volumes: func() []corev1.Volume {
+						vols := []corev1.Volume{
+							{
+								Name: "config",
+								VolumeSource: corev1.VolumeSource{
+									ConfigMap: &corev1.ConfigMapVolumeSource{
+										LocalObjectReference: corev1.LocalObjectReference{Name: "scanner-config"},
+									},
 								},
 							},
-						},
-					},
+						}
+						if hostADCPath != "" {
+							hostType := corev1.HostPathFile
+							vols = append(vols, corev1.Volume{
+								Name: "gcp-adc-host",
+								VolumeSource: corev1.VolumeSource{
+									HostPath: &corev1.HostPathVolumeSource{
+										Path: hostADCPath,
+										Type: &hostType,
+									},
+								},
+							})
+						}
+						return vols
+					}(),
 				},
 			},
 		},

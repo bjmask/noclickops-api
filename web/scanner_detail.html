@@ -26,6 +26,72 @@
         outline: none;
         border-color: var(--primary);
     }
+    .filter-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      position: relative;
+      min-width: 240px;
+    }
+    .filter-label {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+    .filter-trigger {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: rgba(255,255,255,0.04);
+      cursor: pointer;
+    }
+    .filter-trigger input {
+      background: transparent;
+      border: none;
+      color: var(--text-main);
+      width: 100%;
+      outline: none;
+      cursor: pointer;
+    }
+    .caret {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+    .filter-dropdown {
+      display: none;
+      position: absolute;
+      top: 68px;
+      left: 0;
+      z-index: 20;
+      min-width: 260px;
+      max-height: 260px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: rgba(15, 18, 25, 0.98);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+      padding: 8px;
+      text-align: left;
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+    .filter-search {
+      width: 100%;
+      padding: 6px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.04);
+      color: var(--text-main);
+      margin-bottom: 8px;
+    }
+    .filter-options{max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;width:100%;padding:0;margin:0;}
+    .filter-option{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-radius:4px;cursor:pointer;width:100%;box-sizing:border-box;gap:10px;}
+    .filter-option:hover{background:rgba(255,255,255,0.05);}
+    .filter-option.selected{background:rgba(255,255,255,0.08);}
+    .filter-option span{display:block;white-space:normal;text-align:left;flex:1;}
+    .filter-check{width:16px;text-align:right;visibility:hidden;}
+    .filter-option.selected .filter-check{visibility:visible;}
   </style>
 </head>
 
@@ -129,8 +195,44 @@
 
       <div class="card" id="kube-map-card" style="margin-top:24px;display:none;">
         <div style="display:flex;justify-content:space-between;align-items:center;">
-            <h3 style="margin:0;">Kube API Calls</h3>
+            <h3 style="margin:0;">Actions</h3>
             <button class="btn btn-secondary" onclick="toggleKubeMap()" id="toggle-kube-map-btn">Expand</button>
+        </div>
+        <div id="action-filters" style="display:none;gap:12px;margin-top:12px;flex-wrap:wrap;">
+          <div class="filter-group">
+            <span class="filter-label">User</span>
+            <div class="filter-trigger" onclick="toggleDropdown('user')">
+              <input id="filter-user" placeholder="Select value" readonly />
+              <span class="caret">⌄</span>
+            </div>
+            <div id="dropdown-user" class="filter-dropdown" onclick="event.stopPropagation();">
+              <input id="search-user" class="filter-search" placeholder="Search..." oninput="filterOptions('user')" />
+              <div id="options-user" class="filter-options"></div>
+            </div>
+          </div>
+          <div class="filter-group">
+            <span class="filter-label">Resource</span>
+            <div class="filter-trigger" onclick="toggleDropdown('resource')">
+              <input id="filter-resource" placeholder="Select value" readonly />
+              <span class="caret">⌄</span>
+            </div>
+            <div id="dropdown-resource" class="filter-dropdown" onclick="event.stopPropagation();">
+              <input id="search-resource" class="filter-search" placeholder="Search..." oninput="filterOptions('resource')" />
+              <div id="options-resource" class="filter-options"></div>
+            </div>
+          </div>
+          <div class="filter-group">
+            <span class="filter-label">Verb</span>
+            <div class="filter-trigger" onclick="toggleDropdown('verb')">
+              <input id="filter-verb" placeholder="Select value" readonly />
+              <span class="caret">⌄</span>
+            </div>
+            <div id="dropdown-verb" class="filter-dropdown" onclick="event.stopPropagation();">
+              <input id="search-verb" class="filter-search" placeholder="Search..." oninput="filterOptions('verb')" />
+              <div id="options-verb" class="filter-options"></div>
+            </div>
+          </div>
+          <button class="btn btn-secondary" onclick="applyActionFilters()" style="align-self:flex-end;">Apply</button>
         </div>
         <div id="kube-map-content" style="overflow-x:auto;display:none;margin-top:16px;">
           <table class="table" style="width:100%;border-collapse:collapse;">
@@ -208,10 +310,8 @@
             document.getElementById("labels").value = lines.join("\n");
         }
 
-        if (scanner.cloud_provider === "aws" && scanner.config_json && (!scanner.config_json.source || scanner.config_json.source.includes("kubernetes"))) {
-            document.getElementById("kube-map-card").style.display = "block";
-            // Don't load automatically anymore, wait for expand
-        }
+        document.getElementById("kube-map-card").style.display = "block";
+        // Don't load automatically anymore, wait for expand
       } catch (e) {
         errEl.style.display = "block";
         errEl.textContent = e;
@@ -239,22 +339,31 @@
         const tbody = document.getElementById("kube-map-body");
         tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;">Loading...</td></tr>';
         
-        const map = await api(`/v1/scanners/${encodeURIComponent(name)}/kube-map`);
+        const map = await api(`/v1/scanners/${encodeURIComponent(name)}/map`);
         tbody.innerHTML = "";
-        
-        // map is user -> resource -> verb -> count
-        for (const [user, resources] of Object.entries(map)) {
+
+        const merged = {};
+        const mergeMap = (src) => {
+            if (!src) return;
+            for (const [user, resources] of Object.entries(src)) {
+                if (!merged[user]) merged[user] = {};
+                for (const [resource, verbs] of Object.entries(resources)) {
+                    if (!merged[user][resource]) merged[user][resource] = {};
+                    for (const [verb, count] of Object.entries(verbs)) {
+                        merged[user][resource][verb] = (merged[user][resource][verb] || 0) + count;
+                    }
+                }
+            }
+        };
+
+        mergeMap(map.kubernetes);
+        mergeMap(map.events);
+
+        populateFilterDropdowns(merged);
+        for (const [user, resources] of Object.entries(merged)) {
             for (const [resource, verbs] of Object.entries(resources)) {
                 for (const [verb, count] of Object.entries(verbs)) {
-                    const tr = document.createElement("tr");
-                    tr.style.borderBottom = "1px solid rgba(255,255,255,0.05)";
-                    tr.innerHTML = `
-                        <td style="padding:8px;">${user}</td>
-                        <td style="padding:8px;">${resource}</td>
-                        <td style="padding:8px;">${verb}</td>
-                        <td style="padding:8px;">${count}</td>
-                    `;
-                    tbody.appendChild(tr);
+                    addActionRow(user, resource, verb, count);
                 }
             }
         }
@@ -263,6 +372,130 @@
         console.error("failed to load kube map", e);
         document.getElementById("kube-map-body").innerHTML = `<tr><td colspan="4" style="color:red;text-align:center;padding:20px;">Failed to load data: ${e}</td></tr>`;
       }
+    }
+
+    function addActionRow(user, resource, verb, count) {
+        const tbody = document.getElementById("kube-map-body");
+        const tr = document.createElement("tr");
+        tr.style.borderBottom = "1px solid rgba(255,255,255,0.05)";
+        tr.dataset.user = user;
+        tr.dataset.resource = resource;
+        tr.dataset.verb = verb;
+        tr.innerHTML = `
+            <td style="padding:8px;">${user}</td>
+            <td style="padding:8px;">${resource}</td>
+            <td style="padding:8px;">${verb}</td>
+            <td style="padding:8px;">${count}</td>
+        `;
+        tbody.appendChild(tr);
+    }
+
+    const filterState = {
+        user: { values: [], selected: new Set() },
+        resource: { values: [], selected: new Set() },
+        verb: { values: [], selected: new Set() },
+    };
+
+    function populateFilterDropdowns(map) {
+        const users = new Set();
+        const resources = new Set();
+        const verbs = new Set();
+        for (const [user, res] of Object.entries(map)) {
+            users.add(user);
+            for (const [r, vs] of Object.entries(res)) {
+                resources.add(r);
+                for (const v of Object.keys(vs)) {
+                    verbs.add(v);
+                }
+            }
+        }
+        filterState.user.values = Array.from(users).sort();
+        filterState.resource.values = Array.from(resources).sort();
+        filterState.verb.values = Array.from(verbs).sort();
+        buildDropdown("user");
+        buildDropdown("resource");
+        buildDropdown("verb");
+        document.getElementById("action-filters").style.display = "flex";
+    }
+
+    function buildDropdown(kind) {
+        const container = document.getElementById(`options-${kind}`);
+        const values = filterState[kind].values;
+        const selected = filterState[kind].selected;
+        container.innerHTML = "";
+        values.forEach(v => {
+            const item = document.createElement("div");
+            item.className = "filter-option";
+            if (selected.has(v)) item.classList.add("selected");
+            const span = document.createElement("span");
+            span.textContent = v;
+            const check = document.createElement("div");
+            check.className = "filter-check";
+            check.textContent = "✓";
+            item.onclick = () => {
+                if (selected.has(v)) {
+                    selected.delete(v);
+                    item.classList.remove("selected");
+                } else {
+                    selected.add(v);
+                    item.classList.add("selected");
+                }
+                updateFilterInputText(kind);
+            };
+            item.appendChild(span);
+            item.appendChild(check);
+            container.appendChild(item);
+        });
+        updateFilterInputText(kind);
+    }
+
+    function updateFilterInputText(kind) {
+        const input = document.getElementById(`filter-${kind}`);
+        const sel = Array.from(filterState[kind].selected);
+        input.value = sel.length ? sel.join(", ") : "";
+    }
+
+    // Close dropdowns when clicking outside
+    document.addEventListener("click", (e) => {
+        if (!e.target.closest(".filter-group")) {
+            document.querySelectorAll(".filter-dropdown").forEach(d => d.style.display = "none");
+        }
+    });
+
+    function toggleDropdown(kind) {
+        const drop = document.getElementById(`dropdown-${kind}`);
+        const isOpen = drop.style.display === "block";
+        document.querySelectorAll(".filter-dropdown").forEach(d => d.style.display = "none");
+        drop.style.display = isOpen ? "none" : "block";
+        if (!isOpen) {
+            document.getElementById(`search-${kind}`).value = "";
+            filterOptions(kind);
+        }
+    }
+
+    function filterOptions(kind) {
+        const term = (document.getElementById(`search-${kind}`).value || "").toLowerCase();
+        const container = document.getElementById(`options-${kind}`);
+        const items = container.querySelectorAll(".filter-option");
+        items.forEach(item => {
+            const text = item.textContent.toLowerCase();
+            item.style.display = text.includes(term) ? "flex" : "none";
+        });
+    }
+
+    function applyActionFilters() {
+        const users = Array.from(filterState.user.selected);
+        const resources = Array.from(filterState.resource.selected);
+        const verbs = Array.from(filterState.verb.selected);
+        const rows = document.querySelectorAll("#kube-map-body tr");
+        rows.forEach(row => {
+            const matches =
+                (users.length === 0 || users.includes(row.dataset.user)) &&
+                (resources.length === 0 || resources.includes(row.dataset.resource)) &&
+                (verbs.length === 0 || verbs.includes(row.dataset.verb));
+            row.style.display = matches ? "" : "none";
+        });
+        document.querySelectorAll(".filter-dropdown").forEach(d => d.style.display = "none");
     }
 
     async function loadHealth() {
