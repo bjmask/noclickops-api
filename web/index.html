@@ -52,6 +52,24 @@
         <div id="user-chip" class="tag hidden"
           style="margin-top:16px;background:rgba(59,130,246,0.1);color:var(--accent-primary);"></div>
       </div>
+
+      <div class="card" style="margin:40px auto 0;max-width:820px;">
+        <h3 style="margin-bottom:12px;">How it works</h3>
+        <div id="anim-wrap" style="display:grid;grid-template-columns:1.2fr 0.8fr;gap:16px;align-items:start;">
+          <div class="terminal" style="background:#0f1724;border:1px solid rgba(255,255,255,0.05);border-radius:10px;padding:14px;font-family:'SFMono-Regular',Consolas,monospace;font-size:14px;min-height:120px;box-shadow:0 10px 30px rgba(0,0,0,0.25);">
+            <div style="color:var(--text-muted);margin-bottom:6px;">kubectl</div>
+            <div><span style="color:#6ee7ff;">$</span> <span id="anim-cmd"></span><span id="anim-cursor" style="background:#6ee7ff;color:#0f1724;padding:0 2px;margin-left:1px;">█</span></div>
+          </div>
+          <div class="card" style="background:#111827;border:1px solid rgba(255,255,255,0.05);border-radius:10px;padding:12px;box-shadow:0 10px 30px rgba(0,0,0,0.25);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+              <span style="color:var(--text-muted);font-size:0.9rem;">Dashboard</span>
+              <span id="anim-status" class="tag">Listening…</span>
+            </div>
+            <div id="anim-count" style="font-size:32px;font-weight:700;">12</div>
+            <div id="anim-log" class="text-muted" style="margin-top:6px;font-size:0.9rem;min-height:22px;">Waiting for activity…</div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="feature-grid">
@@ -78,8 +96,14 @@
     const loginError = document.getElementById("login-error");
     const userChip = document.getElementById("user-chip");
     const goDashboard = document.getElementById("go-dashboard");
+    const animCmd = document.getElementById("anim-cmd");
+    const animCursor = document.getElementById("anim-cursor");
+    const animCount = document.getElementById("anim-count");
+    const animStatus = document.getElementById("anim-status");
+    const animLog = document.getElementById("anim-log");
 
     let token = localStorage.getItem("noclickops_token") || "";
+    let animCountVal = 12;
 
     function setToken(t) {
       token = t;
@@ -137,6 +161,45 @@
     });
 
     refreshMe();
+
+    // Lightweight hero animation: type kubectl, then bump findings.
+    const commandText = "kubectl run andres-debug-1 --image=ubuntu -- tail -f /dev/null";
+    function typeCommand(text, cb) {
+      animCmd.textContent = "";
+      let i = 0;
+      animCursor.style.opacity = 1;
+      const id = setInterval(() => {
+        animCmd.textContent = text.slice(0, i);
+        i++;
+        if (i > text.length) {
+          clearInterval(id);
+          setTimeout(cb, 300);
+        }
+      }, 20);
+    }
+    function pulse(el) {
+      el.animate([{ transform: "scale(0.97)" }, { transform: "scale(1)" }], { duration: 250 });
+    }
+    function runLoop() {
+      animStatus.textContent = "Running…";
+      animStatus.className = "tag";
+      typeCommand(commandText, () => {
+        animStatus.textContent = "ClickOps detected";
+        animStatus.className = "tag";
+        animStatus.style.background = "rgba(99, 102, 241, 0.2)";
+        animStatus.style.color = "var(--accent-primary)";
+        animCountVal += 1;
+        animCount.textContent = animCountVal;
+        animLog.textContent = "kubectl run → pod create recorded";
+        pulse(animCount);
+        setTimeout(() => {
+          animStatus.textContent = "Listening…";
+          animStatus.style = "";
+          setTimeout(runLoop, 1200);
+        }, 600);
+      });
+    }
+    setTimeout(runLoop, 500);
   </script>
 </body>
 

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trusted Rules</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <script src="/static/nav.js"></script>
+</head>
+<body>
+  <div class="layout-dashboard">
+    <aside>
+      <div id="nav-container"></div>
+      <div style="margin-top:auto;">
+        <button id="logout-btn" class="btn btn-secondary" style="width:100%;">Logout</button>
+      </div>
+    </aside>
+
+    <main>
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Trusted Rules</h1>
+          <p class="text-muted" style="margin-top:6px;">Define user/resource/verb patterns to hide from Findings by default.</p>
+        </div>
+        <div style="display:flex;gap:12px;align-items:flex-end;">
+          <div class="input-group" style="max-width:220px;">
+            <label class="input-label">User (glob or /regex/)</label>
+            <input id="user-pattern" placeholder="user@example.com or admin*" />
+          </div>
+          <div class="input-group" style="max-width:220px;">
+            <label class="input-label">Resource</label>
+            <input id="resource-pattern" placeholder="pods or *" />
+          </div>
+          <div class="input-group" style="max-width:220px;">
+            <label class="input-label">Verb</label>
+            <input id="verb-pattern" placeholder="FilterLogEvents or *" />
+          </div>
+          <button class="btn btn-primary" style="height:42px;margin-bottom:2px;" onclick="addRule()">Add</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <h3 style="margin:0;">Rules</h3>
+          <span class="text-muted" id="rule-count"></span>
+        </div>
+        <table class="table" style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr style="text-align:left;border-bottom:1px solid var(--border);">
+              <th style="padding:8px;">User</th>
+              <th style="padding:8px;">Resource</th>
+              <th style="padding:8px;">Verb</th>
+              <th style="padding:8px;width:80px;">Action</th>
+            </tr>
+          </thead>
+          <tbody id="rules-body"></tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    mountNav('trusts');
+
+    const token = localStorage.getItem("noclickops_token") || "";
+    const errEl = document.createElement("div");
+
+    function redirectToLogin() {
+      localStorage.removeItem("noclickops_token");
+      window.location.href = "/";
+    }
+
+    async function api(path, opts = {}) {
+      const headers = opts.headers || {};
+      headers["Content-Type"] = "application/json";
+      if (token) headers["Authorization"] = "Bearer " + token;
+      const res = await fetch(path, { ...opts, headers });
+      let data = {};
+      try { data = await res.json(); } catch (_) {}
+      if (res.status === 401) { redirectToLogin(); throw "unauthorized"; }
+      if (!res.ok) throw data.error || res.statusText;
+      return data;
+    }
+
+    async function loadRules() {
+      const tbody = document.getElementById("rules-body");
+      tbody.innerHTML = '<tr><td colspan="4" style="padding:12px;text-align:center;">Loading...</td></tr>';
+      try {
+        const rules = await api("/v1/trusts");
+        tbody.innerHTML = "";
+        document.getElementById("rule-count").textContent = `${rules.length} rule(s)`;
+        if (!rules.length) {
+          tbody.innerHTML = '<tr><td colspan="4" style="padding:12px;color:var(--text-muted);text-align:center;">No rules defined</td></tr>';
+          return;
+        }
+        rules.forEach(r => {
+          const tr = document.createElement("tr");
+          tr.style.borderBottom = "1px solid var(--border)";
+          tr.innerHTML = `
+            <td style="padding:8px;">${r.user_pattern}</td>
+            <td style="padding:8px;">${r.resource_pattern}</td>
+            <td style="padding:8px;">${r.verb_pattern}</td>
+            <td style="padding:8px;"><button class="btn btn-secondary" style="padding:4px 10px;font-size:0.85rem;" onclick="deleteRule(${r.id})">Delete</button></td>
+          `;
+          tbody.appendChild(tr);
+        });
+      } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="4" style="padding:12px;color:red;">${e}</td></tr>`;
+      }
+    }
+
+    async function addRule() {
+      const user = document.getElementById("user-pattern").value.trim();
+      const res = document.getElementById("resource-pattern").value.trim() || "*";
+      const verb = document.getElementById("verb-pattern").value.trim() || "*";
+      if (!user) { alert("User pattern is required"); return; }
+      try {
+        await api("/v1/trusts", { method: "POST", body: JSON.stringify({ user_pattern: user, resource_pattern: res, verb_pattern: verb }) });
+        document.getElementById("user-pattern").value = "";
+        document.getElementById("resource-pattern").value = "";
+        document.getElementById("verb-pattern").value = "";
+        loadRules();
+      } catch (e) {
+        alert(e);
+      }
+    }
+
+    async function deleteRule(id) {
+      if (!confirm("Delete this rule?")) return;
+      try {
+        await api(`/v1/trusts/${id}`, { method: "DELETE" });
+        loadRules();
+      } catch (e) {
+        alert(e);
+      }
+    }
+
+    document.getElementById("logout-btn").onclick = redirectToLogin;
+    loadRules();
+  </script>
+</body>
+</html>

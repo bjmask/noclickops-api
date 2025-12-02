@@ -391,3 +391,18 @@ pre, code {
   font-size: 0.9rem;
   overflow: auto;
 }
+
+/* Trust indicator dots */
+.trust-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+.trust-ok {
+  background: #2ecc71;
+}
+.trust-miss {
+  background: #e74c3c;
+}

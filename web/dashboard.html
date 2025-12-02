@@ -6,23 +6,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NoClickOps Dashboard</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/nav.js"></script>
 </head>
 
 <body>
   <div class="layout-dashboard">
     <aside>
-      <div class="brand">
-        <div class="brand-icon">N</div>
-        <span>NoClickOps</span>
-      </div>
-
-      <div class="nav-group">
-        <div class="nav-label">Platform</div>
-        <a class="nav-link active" href="/dashboard.html">Dashboard</a>
-        <a class="nav-link" href="/findings.html">Findings</a>
-        <a class="nav-link" href="/scanners.html">Scanners</a>
-        <a class="nav-link" href="/docs.html">Docs</a>
-      </div>
+      <div id="nav-container"></div>
 
       <div style="margin-top:auto;">
         <button id="logout-btn" class="btn btn-secondary" style="width:100%;">Logout</button>
@@ -61,6 +51,24 @@
   </div>
 
   <script>
+    mountNav('dashboard');
+
+    (function loadNav() {
+      fetch('/nav.html').then(r => r.text()).then(html => {
+        const container = document.getElementById("nav-container");
+        container.innerHTML = html;
+        // Highlight current page
+        const path = window.location.pathname;
+        container.querySelectorAll(".nav-link").forEach(a => {
+          if (a.getAttribute("href") === path) {
+            a.classList.add("active");
+          } else {
+            a.classList.remove("active");
+          }
+        });
+      }).catch(() => {});
+    })();
+
     let token = localStorage.getItem("noclickops_token") || "";
     const err = document.getElementById("err");
     const tenantName = document.getElementById("tenant-name");

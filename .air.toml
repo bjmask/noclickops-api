@@ -12,7 +12,7 @@ tmp_dir = "tmp"
   exclude_regex = ["_test.go"]
   exclude_unchanged = false
   follow_symlink = false
-  full_bin = "./run_dev.sh"
+  full_bin = "./tmp/main"
   include_dir = []
   include_ext = ["go", "tpl", "tmpl", "html", "css"]
   include_file = []
@@ -23,7 +23,7 @@ tmp_dir = "tmp"
   rerun = false
   rerun_delay = 500
   send_interrupt = true
-  stop_on_error = false
+  stop_on_error = true
 
 [color]
   app = ""

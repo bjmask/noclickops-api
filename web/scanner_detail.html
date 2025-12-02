@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Scanner Detail</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/nav.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
   <style>
     .masked-input {
@@ -98,18 +99,7 @@
 <body>
   <div class="layout-dashboard">
     <aside>
-      <div class="brand">
-        <div class="brand-icon">N</div>
-        <span>NoClickOps</span>
-      </div>
-
-      <div class="nav-group">
-        <div class="nav-label">Platform</div>
-        <a class="nav-link" href="/dashboard.html">Dashboard</a>
-        <a class="nav-link" href="/findings.html">Findings</a>
-        <a class="nav-link active" href="/scanners.html">Scanners</a>
-        <a class="nav-link" href="/docs.html">Docs</a>
-      </div>
+      <div id="nav-container"></div>
 
       <div style="margin-top:auto;">
         <button id="logout-btn" class="btn btn-secondary" style="width:100%;">Logout</button>
@@ -125,7 +115,11 @@
             <span id="status" class="text-muted">Loading...</span>
           </div>
         </div>
-        <div style="display:flex;gap:12px;">
+        <div style="display:flex;gap:12px;align-items:flex-end;">
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-secondary" id="tab-config-btn" onclick="switchTab('config')">Configuration</button>
+            <button class="btn btn-secondary" id="tab-findings-btn" onclick="switchTab('findings')">Findings</button>
+          </div>
           <button class="btn btn-danger" id="delete-btn">Delete Scanner</button>
           <button class="btn btn-primary" onclick="updateScanner()">Save Changes</button>
         </div>
@@ -133,6 +127,7 @@
 
       <div class="error" id="err" style="display:none;margin-bottom:24px;"></div>
 
+      <div id="tab-config" style="display:block;">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
         <div class="card">
           <h3 style="margin-bottom:20px;">Configuration</h3>
@@ -195,7 +190,7 @@
 
       <div class="card" id="kube-map-card" style="margin-top:24px;display:none;">
         <div style="display:flex;justify-content:space-between;align-items:center;">
-            <h3 style="margin:0;">Actions</h3>
+            <h3 style="margin:0;">Findings</h3>
             <button class="btn btn-secondary" onclick="toggleKubeMap()" id="toggle-kube-map-btn">Expand</button>
         </div>
         <div id="action-filters" style="display:none;gap:12px;margin-top:12px;flex-wrap:wrap;">
@@ -232,20 +227,76 @@
               <div id="options-verb" class="filter-options"></div>
             </div>
           </div>
-          <button class="btn btn-secondary" onclick="applyActionFilters()" style="align-self:flex-end;">Apply</button>
+          <div style="display:flex;gap:8px;align-items:flex-end;">
+            <button class="btn btn-secondary" onclick="applyActionFilters()">Apply</button>
+            <button class="btn btn-secondary" onclick="clearActionFilters()">Clear Filters</button>
+          </div>
         </div>
-        <div id="kube-map-content" style="overflow-x:auto;display:none;margin-top:16px;">
-          <table class="table" style="width:100%;border-collapse:collapse;">
+        <div id="kube-map-content" style="display:none;margin-top:16px;">
+          <table class="table" style="width:100%;border-collapse:collapse;table-layout:fixed;">
             <thead>
               <tr style="text-align:left;border-bottom:1px solid var(--border);">
-                <th style="padding:8px;cursor:pointer" onclick="sortTable(0)">User ↕</th>
-                <th style="padding:8px;cursor:pointer" onclick="sortTable(1)">Resource ↕</th>
-                <th style="padding:8px;cursor:pointer" onclick="sortTable(2)">Verb ↕</th>
-                <th style="padding:8px;cursor:pointer" onclick="sortTable(3)">Count ↕</th>
+                <th style="padding:8px;cursor:pointer;width:28%;" onclick="sortTable(0)">User ↕</th>
+                <th style="padding:8px;cursor:pointer;width:32%;" onclick="sortTable(1)">Resource ↕</th>
+                <th style="padding:8px;cursor:pointer;width:20%;" onclick="sortTable(2)">Verb ↕</th>
+                <th style="padding:8px;cursor:pointer;width:10%;text-align:right;">Count ↕</th>
+                <th style="padding:8px;width:10%;">Trusted</th>
               </tr>
             </thead>
             <tbody id="kube-map-body"></tbody>
           </table>
+        </div>
+      </div>
+      </div>
+
+      <div id="tab-findings" style="display:none;">
+        <div class="card" style="padding:16px 16px 0 16px;overflow:hidden;margin-top:12px;">
+          <div id="findings-filters" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+            <div class="filter-group">
+              <span class="filter-label">User</span>
+              <select id="findings-filter-user">
+                <option value="">All</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <span class="filter-label">Resource</span>
+              <select id="findings-filter-resource">
+                <option value="">All</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <span class="filter-label">Verb</span>
+              <select id="findings-filter-verb">
+                <option value="">All</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <span class="filter-label">Trusted</span>
+              <select id="findings-filter-trusted">
+                <option value="">All</option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </div>
+            <div style="display:flex;gap:8px;align-items:flex-end;">
+              <button class="btn btn-secondary" onclick="applyFindingsFilters()">Apply</button>
+              <button class="btn btn-secondary" onclick="clearFindingsFilters()">Clear</button>
+            </div>
+          </div>
+          <div class="table-container" style="border:none;border-radius:0;">
+            <table id="scanner-findings-table" class="table" style="width:100%;border-collapse:collapse;">
+              <thead>
+                <tr>
+                  <th style="padding:8px;cursor:pointer;width:28%;" onclick="sortFindings(0)">User ↕</th>
+                <th style="padding:8px;cursor:pointer;width:32%;" onclick="sortFindings(1)">Resource ↕</th>
+                <th style="padding:8px;cursor:pointer;width:20%;" onclick="sortFindings(2)">Verb ↕</th>
+                <th style="padding:8px;cursor:pointer;width:10%;text-align:right;" onclick="sortFindings(3)">Count ↕</th>
+                <th style="padding:8px;width:10%;" onclick="sortFindings(4)">Trusted ↕</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
       </div>
     </main>
@@ -265,6 +316,12 @@
     let logController = null;
     let statusInterval = null;
     document.getElementById("title").textContent = `Scanner: ${name}`;
+    let trustRules = [];
+    let trustRulesCompiled = [];
+    let trustRulesLoaded = false;
+    let allActions = [];
+
+    mountNav('scanners');
 
     function redirectToLogin() {
       localStorage.removeItem("noclickops_token");
@@ -285,6 +342,7 @@
     async function load() {
       try {
         await loadHealth();
+        await loadTrustRules();
         const scanner = await api(`/v1/scanners/${encodeURIComponent(name)}`);
         if (scanner.config_json) {
           configText.value = JSON.stringify(scanner.config_json, null, 2);
@@ -318,6 +376,33 @@
       }
     }
 
+    async function loadTrustRules() {
+      try {
+        const list = await api("/v1/trusts");
+        trustRules = Array.isArray(list) ? list : [];
+        // console.log("[trusts] loaded rules:", trustRules);
+        trustRulesCompiled = trustRules.map(r => ({
+          raw: r,
+          user: regexFromPattern(normalizePattern(r.user_pattern)),
+          resource: regexFromPattern(normalizePattern(r.resource_pattern)),
+          verb: regexFromPattern(normalizePattern(r.verb_pattern)),
+        })).filter(r => r.user && r.resource && r.verb);
+        // console.log("[trusts] compiled rules:", trustRulesCompiled);
+        // trustRulesCompiled.forEach(r => {
+        //     console.log("[trusts] compiled",
+        //     r.raw.user_pattern, "=>", r.user,
+        //     r.raw.resource_pattern, "=>", r.resource,
+        //     r.raw.verb_pattern, "=>", r.verb);
+        // });
+        trustRulesLoaded = true;
+      } catch (e) {
+        console.error("[trusts] failed to load trust rules", e);
+        trustRules = [];
+        trustRulesCompiled = [];
+        trustRulesLoaded = false;
+      }
+    }
+
     let kubeMapLoaded = false;
     function toggleKubeMap() {
         const content = document.getElementById("kube-map-content");
@@ -338,7 +423,10 @@
       try {
         const tbody = document.getElementById("kube-map-body");
         tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;">Loading...</td></tr>';
-        
+
+        // Always refresh trust rules before rendering so matches are up to date
+        await loadTrustRules();
+
         const map = await api(`/v1/scanners/${encodeURIComponent(name)}/map`);
         tbody.innerHTML = "";
 
@@ -359,14 +447,17 @@
         mergeMap(map.kubernetes);
         mergeMap(map.events);
 
-        populateFilterDropdowns(merged);
+        allActions = [];
         for (const [user, resources] of Object.entries(merged)) {
-            for (const [resource, verbs] of Object.entries(resources)) {
-                for (const [verb, count] of Object.entries(verbs)) {
-                    addActionRow(user, resource, verb, count);
-                }
+          for (const [resource, verbs] of Object.entries(resources)) {
+            for (const [verb, count] of Object.entries(verbs)) {
+              allActions.push({ user, resource, verb, count });
             }
+          }
         }
+
+        populateFilterDropdowns();
+        renderActions();
         kubeMapLoaded = true;
       } catch (e) {
         console.error("failed to load kube map", e);
@@ -374,20 +465,54 @@
       }
     }
 
-    function addActionRow(user, resource, verb, count) {
-        const tbody = document.getElementById("kube-map-body");
-        const tr = document.createElement("tr");
-        tr.style.borderBottom = "1px solid rgba(255,255,255,0.05)";
-        tr.dataset.user = user;
-        tr.dataset.resource = resource;
-        tr.dataset.verb = verb;
-        tr.innerHTML = `
-            <td style="padding:8px;">${user}</td>
-            <td style="padding:8px;">${resource}</td>
-            <td style="padding:8px;">${verb}</td>
-            <td style="padding:8px;">${count}</td>
-        `;
-        tbody.appendChild(tr);
+    async function loadScannerFindings() {
+      const tbody = document.querySelector("#scanner-findings-table tbody");
+      try {
+        tbody.innerHTML = '<tr><td colspan="7" style="padding:16px;text-align:center;">Loading...</td></tr>';
+        // Reuse the map endpoint to display aggregated actions as findings
+        const map = await api(`/v1/scanners/${encodeURIComponent(name)}/map`);
+        const merged = {};
+        const mergeMap = (src) => {
+            if (!src) return;
+            for (const [user, resources] of Object.entries(src)) {
+                if (!merged[user]) merged[user] = {};
+                for (const [resource, verbs] of Object.entries(resources)) {
+                    if (!merged[user][resource]) merged[user][resource] = {};
+                    for (const [verb, count] of Object.entries(verbs)) {
+                        merged[user][resource][verb] = (merged[user][resource][verb] || 0) + count;
+                    }
+                }
+            }
+        };
+        mergeMap(map.kubernetes);
+        mergeMap(map.events);
+
+        const rows = [];
+        for (const [user, resources] of Object.entries(merged)) {
+          for (const [resource, verbs] of Object.entries(resources)) {
+            for (const [verb, count] of Object.entries(verbs)) {
+              const match = findTrustMatch({ user, resource, verb });
+              rows.push({ user, resource, verb, count, trusted: !!match, trustLabel: match ? match.label : null, trustId: match ? match.id : null });
+            }
+          }
+        }
+
+        if (rows.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" style="padding:16px;text-align:center;color:var(--text-muted);">No findings found.</td></tr>';
+          return;
+        }
+
+        // Ensure trust rules are loaded for trust indicator
+        if (!trustRulesLoaded) {
+          await loadTrustRules();
+        }
+
+        window._scannerFindingsRows = rows;
+        populateFindingsFilterOptions(rows);
+        renderFindingsTable(rows);
+      } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="7" style="padding:16px;text-align:center;color:red;">Failed to load findings: ${e}</td></tr>`;
+      }
     }
 
     const filterState = {
@@ -396,18 +521,14 @@
         verb: { values: [], selected: new Set() },
     };
 
-    function populateFilterDropdowns(map) {
+    function populateFilterDropdowns() {
         const users = new Set();
         const resources = new Set();
         const verbs = new Set();
-        for (const [user, res] of Object.entries(map)) {
-            users.add(user);
-            for (const [r, vs] of Object.entries(res)) {
-                resources.add(r);
-                for (const v of Object.keys(vs)) {
-                    verbs.add(v);
-                }
-            }
+        for (const item of allActions) {
+          users.add(item.user);
+          resources.add(item.resource);
+          verbs.add(item.verb);
         }
         filterState.user.values = Array.from(users).sort();
         filterState.resource.values = Array.from(resources).sort();
@@ -441,6 +562,7 @@
                     item.classList.add("selected");
                 }
                 updateFilterInputText(kind);
+                // do not close dropdown; defer render until click outside
             };
             item.appendChild(span);
             item.appendChild(check);
@@ -456,9 +578,14 @@
     }
 
     // Close dropdowns when clicking outside
+    let dropdownOpen = false;
     document.addEventListener("click", (e) => {
         if (!e.target.closest(".filter-group")) {
-            document.querySelectorAll(".filter-dropdown").forEach(d => d.style.display = "none");
+            if (dropdownOpen) {
+                dropdownOpen = false;
+                document.querySelectorAll(".filter-dropdown").forEach(d => d.style.display = "none");
+                applyActionFilters();
+            }
         }
     });
 
@@ -467,9 +594,12 @@
         const isOpen = drop.style.display === "block";
         document.querySelectorAll(".filter-dropdown").forEach(d => d.style.display = "none");
         drop.style.display = isOpen ? "none" : "block";
+        dropdownOpen = !isOpen;
         if (!isOpen) {
-            document.getElementById(`search-${kind}`).value = "";
+            const search = document.getElementById(`search-${kind}`);
+            search.value = "";
             filterOptions(kind);
+            search.focus();
         }
     }
 
@@ -477,25 +607,192 @@
         const term = (document.getElementById(`search-${kind}`).value || "").toLowerCase();
         const container = document.getElementById(`options-${kind}`);
         const items = container.querySelectorAll(".filter-option");
+        const selected = filterState[kind].selected;
+        const hasGlob = term.includes("*") || term.includes("?");
+        const regex = hasGlob ? new RegExp("^" + term.split("*").map(part => part.split("?").map(p => p.replace(/[-/\\^$+?.()|[\]{}]/g, "\\$&")).join(".")).join(".*") + "$", "i") : null;
         items.forEach(item => {
             const text = item.textContent.toLowerCase();
             item.style.display = text.includes(term) ? "flex" : "none";
+            if (hasGlob && regex && regex.test(text)) {
+                // Auto-select glob matches
+                const val = item.querySelector("span")?.textContent || "";
+                selected.add(val);
+                item.classList.add("selected");
+            }
         });
+        if (hasGlob) {
+            updateFilterInputText(kind);
+        }
+    }
+
+    function compilePatterns(patterns) {
+      return (patterns || [])
+        .map(regexFromPattern)
+        .filter(Boolean);
+    }
+
+    function renderActions() {
+      const tbody = document.getElementById("kube-map-body");
+      tbody.innerHTML = "";
+      const users = Array.from(filterState.user.selected);
+      const resources = Array.from(filterState.resource.selected);
+      const verbs = Array.from(filterState.verb.selected);
+
+      const filtered = allActions.filter(item => {
+        const userOk = users.length === 0 || users.includes(item.user);
+        const resOk = resources.length === 0 || resources.includes(item.resource);
+        const verbOk = verbs.length === 0 || verbs.includes(item.verb);
+        return userOk && resOk && verbOk;
+      });
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:12px;color:var(--text-muted);">No actions to display</td></tr>';
+        return;
+      }
+
+      for (const row of filtered) {
+        const trustMatch = findTrustMatch(row);
+        const tr = document.createElement("tr");
+        tr.style.borderBottom = "1px solid rgba(255,255,255,0.05)";
+        tr.innerHTML = `
+            <td style="padding:8px;word-break:break-word;">${row.user}</td>
+            <td style="padding:8px;word-break:break-word;">${row.resource}</td>
+            <td style="padding:8px;word-break:break-word;">${row.verb}</td>
+            <td style="padding:8px;text-align:right;">${row.count}</td>
+            <td style="padding:8px;cursor:pointer;" onclick="openTrustModal(${trustMatch ? `'${row.user}','${row.resource}','${row.verb}','${trustMatch.id}'` : `'${row.user}','${row.resource}','${row.verb}',''`})">
+              <span class="trust-dot ${trustMatch ? 'trust-ok' : 'trust-miss'}" title="${trustMatch ? `Matched by trust ${trustMatch.label}` : 'No trust rule matched'}"></span>
+            </td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    function findTrustMatch(row) {
+      // console.log("[trusts][match-check] checking row", row);
+      const u = String(row.user || "").trim();
+      const r = String(row.resource || "").trim();
+      const v = String(row.verb || "").trim();
+
+      if (!trustRulesCompiled.length) {
+        // console.warn("[trusts][match-check] no compiled rules loaded yet");
+        return null;
+      }
+
+      // console.log("[trusts][match-check] compiled rules count", trustRulesCompiled.length);
+      for (const rule of trustRulesCompiled) {
+        const um = !!(rule.user && rule.user.test(u));
+        const rm = !!(rule.resource && rule.resource.test(r));
+        const vm = !!(rule.verb && rule.verb.test(v));
+        // console.log("[trusts][match-check]-iter", { user: u, resource: r, verb: v }, "rule", rule.raw, "matches", { user: um, resource: rm, verb: vm });
+        if (um && rm && vm) {
+          const raw = rule.raw || {};
+          const label = `${raw.user_pattern || '*'} / ${raw.resource_pattern || '*'} / ${raw.verb_pattern || '*'}`;
+          return { label, id: raw.id };
+        }
+      }
+      // console.log("[trusts][match-check] no rules matched row", row);
+      return null;
+    }
+
+    function normalizePattern(p) {
+      const val = (p || "").trim();
+      if (!val || val.toLowerCase() === "all") return ".*";
+      if (val === "*") return ".*";
+      return val;
+    }
+
+    function regexFromPattern(pat) {
+      const p = (pat || "").trim();
+      if (!p) return null;
+      if (p.startsWith("/") && p.endsWith("/") && p.length > 2) {
+        try {
+          return new RegExp(p.slice(1, -1), "i");
+        } catch (e) {
+          console.error("[trusts] invalid regex pattern", p, e);
+          return null;
+        }
+      }
+      try {
+        return new RegExp(p, "i");
+      } catch (e) {
+        console.error("[trusts] invalid regex pattern", p, e);
+        return null;
+      }
+    }
+
+    function populateFindingsFilterOptions(rows) {
+      const users = new Set();
+      const resources = new Set();
+      const verbs = new Set();
+      rows.forEach(r => {
+        users.add(r.user);
+        resources.add(r.resource);
+        verbs.add(r.verb);
+      });
+      const fill = (id, values) => {
+        const sel = document.getElementById(id);
+        sel.innerHTML = '<option value="">All</option>' + Array.from(values).sort().map(v => `<option value="${v}">${v}</option>`).join("");
+      };
+      fill("findings-filter-user", users);
+      fill("findings-filter-resource", resources);
+      fill("findings-filter-verb", verbs);
+    }
+
+    function applyFindingsFilters() {
+      const user = document.getElementById("findings-filter-user").value;
+      const resource = document.getElementById("findings-filter-resource").value;
+      const verb = document.getElementById("findings-filter-verb").value;
+      const trusted = document.getElementById("findings-filter-trusted").value;
+      const rows = (window._scannerFindingsRows || []).filter(r => {
+        const userOk = !user || r.user === user;
+        const resOk = !resource || r.resource === resource;
+        const verbOk = !verb || r.verb === verb;
+        const trustOk = !trusted || (trusted === "yes" ? r.trusted : !r.trusted);
+        return userOk && resOk && verbOk && trustOk;
+      });
+      renderFindingsTable(rows);
+    }
+
+    function clearFindingsFilters() {
+      document.getElementById("findings-filter-user").value = "";
+      document.getElementById("findings-filter-resource").value = "";
+      document.getElementById("findings-filter-verb").value = "";
+      document.getElementById("findings-filter-trusted").value = "";
+      renderFindingsTable(window._scannerFindingsRows || []);
+    }
+
+    function renderFindingsTable(rows) {
+      const tbody = document.querySelector("#scanner-findings-table tbody");
+      if (!rows || rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="padding:16px;text-align:center;color:var(--text-muted);">No findings found.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map(row => {
+        const trustMatch = row.trusted ? { label: row.trustLabel, id: row.trustId } : null;
+        return `
+          <tr>
+            <td style="padding:8px;word-break:break-word;">${row.user}</td>
+            <td style="padding:8px;word-break:break-word;">${row.resource}</td>
+            <td style="padding:8px;word-break:break-word;">${row.verb}</td>
+            <td style="padding:8px;text-align:right;">${row.count}</td>
+            <td style="padding:8px;cursor:pointer;" onclick="openTrustModal(${trustMatch ? `'${row.user}','${row.resource}','${row.verb}','${trustMatch.id}'` : `'${row.user}','${row.resource}','${row.verb}',''`})"><span class="trust-dot ${trustMatch ? 'trust-ok' : 'trust-miss'}" title="${trustMatch ? `Matched by trust ${trustMatch.label}` : 'No trust rule matched'}"></span></td>
+          </tr>
+        `;
+      }).join("");
     }
 
     function applyActionFilters() {
-        const users = Array.from(filterState.user.selected);
-        const resources = Array.from(filterState.resource.selected);
-        const verbs = Array.from(filterState.verb.selected);
-        const rows = document.querySelectorAll("#kube-map-body tr");
-        rows.forEach(row => {
-            const matches =
-                (users.length === 0 || users.includes(row.dataset.user)) &&
-                (resources.length === 0 || resources.includes(row.dataset.resource)) &&
-                (verbs.length === 0 || verbs.includes(row.dataset.verb));
-            row.style.display = matches ? "" : "none";
-        });
         document.querySelectorAll(".filter-dropdown").forEach(d => d.style.display = "none");
+        renderActions();
+    }
+
+    function clearActionFilters() {
+        ["user", "resource", "verb"].forEach(kind => {
+            filterState[kind].selected.clear();
+            updateFilterInputText(kind);
+        });
+        document.getElementById("exclude-users").value = "";
+        applyActionFilters();
     }
 
     async function loadHealth() {
@@ -640,8 +937,138 @@
       rows.forEach(row => tbody.appendChild(row));
     }
 
+    function sortFindings(colIdx) {
+      const tbody = document.querySelector("#scanner-findings-table tbody");
+      const rows = Array.from(tbody.rows);
+      if (!rows.length) return;
+      let dir = tbody.getAttribute("data-sort-dir") === "asc" ? "desc" : "asc";
+      tbody.setAttribute("data-sort-dir", dir);
+
+      rows.sort((a, b) => {
+        // trusted column sorting by class (green first)
+        if (colIdx === 4) {
+          const ax = a.cells[colIdx].querySelector(".trust-dot")?.classList.contains("trust-ok") ? 1 : 0;
+          const ay = b.cells[colIdx].querySelector(".trust-dot")?.classList.contains("trust-ok") ? 1 : 0;
+          return dir === "asc" ? ax - ay : ay - ax;
+        }
+        let x = a.cells[colIdx].textContent.toLowerCase();
+        let y = b.cells[colIdx].textContent.toLowerCase();
+        // numeric for count column
+        if (colIdx === 3) {
+          const nx = parseFloat(x) || 0;
+          const ny = parseFloat(y) || 0;
+          return dir === "asc" ? nx - ny : ny - nx;
+        }
+        return dir === "asc" ? x.localeCompare(y) : y.localeCompare(x);
+      });
+
+      rows.forEach(r => tbody.appendChild(r));
+    }
+
     if (!token) redirectToLogin(); else load();
+
+    function switchTab(tab) {
+      const configTab = document.getElementById("tab-config");
+      const findingsTab = document.getElementById("tab-findings");
+      const configBtn = document.getElementById("tab-config-btn");
+      const findingsBtn = document.getElementById("tab-findings-btn");
+      if (tab === "findings") {
+        configTab.style.display = "none";
+        findingsTab.style.display = "block";
+        configBtn.classList.remove("btn-primary");
+        findingsBtn.classList.add("btn-primary");
+        loadScannerFindings();
+      } else {
+        configTab.style.display = "block";
+        findingsTab.style.display = "none";
+        findingsBtn.classList.remove("btn-primary");
+        configBtn.classList.add("btn-primary");
+      }
+    }
+
+    // default active tab
+    switchTab("config");
+  </script>
+  <div id="trust-modal" class="modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;z-index:1000;">
+    <div class="modal-content" style="background:#111827;border:1px solid var(--border);border-radius:8px;padding:16px;width:420px;max-width:90%;color:var(--text-main);">
+      <h3 id="trust-modal-title" style="margin-top:0;">Add Trust</h3>
+      <div class="input-group">
+        <label class="input-label">User Pattern</label>
+        <input id="trust-user" />
+      </div>
+      <div class="input-group">
+        <label class="input-label">Resource Pattern</label>
+        <select id="trust-resource">
+          <option value="*">All</option>
+        </select>
+      </div>
+      <div class="input-group">
+        <label class="input-label">Verb Pattern</label>
+        <select id="trust-verb">
+          <option value="*">All</option>
+        </select>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
+        <button class="btn btn-secondary" onclick="closeTrustModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveTrust()">Save</button>
+      </div>
+      <input type="hidden" id="trust-id" value="" />
+    </div>
+  </div>
+  <script>
+    function openTrustModal(user, resource, verb, trustId) {
+      const resources = new Set(allActions.map(a => a.resource));
+      const verbs = new Set(allActions.map(a => a.verb));
+      const resSel = document.getElementById("trust-resource");
+      const verbSel = document.getElementById("trust-verb");
+      const buildOptions = (sel, values, current) => {
+        sel.innerHTML = '<option value="*">All</option>' + Array.from(values).sort().map(v => `<option value="${v}">${v}</option>`).join("");
+        if (current && sel.querySelector(`option[value="${current}"]`)) {
+          sel.value = current;
+        } else {
+          sel.value = "*";
+        }
+      };
+      buildOptions(resSel, resources, resource);
+      buildOptions(verbSel, verbs, verb);
+      document.getElementById("trust-user").value = user || "";
+      document.getElementById("trust-id").value = trustId || "";
+      document.getElementById("trust-modal-title").textContent = trustId ? "Edit Trust" : "Add Trust";
+      document.getElementById("trust-modal").style.display = "flex";
+    }
+
+    function closeTrustModal() {
+      document.getElementById("trust-modal").style.display = "none";
+    }
+
+    async function saveTrust() {
+      const user = document.getElementById("trust-user").value.trim();
+      const resource = document.getElementById("trust-resource").value || "*";
+      const verb = document.getElementById("trust-verb").value || "*";
+      const id = document.getElementById("trust-id").value;
+      if (!user) {
+        alert("User pattern is required");
+        return;
+      }
+      const payload = { user_pattern: user, resource_pattern: resource, verb_pattern: verb };
+      try {
+        if (id) {
+          await api(`/v1/trusts/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+        } else {
+          await api("/v1/trusts", { method: "POST", body: JSON.stringify(payload) });
+        }
+        await loadTrustRules();
+        renderActions();
+        await loadScannerFindings();
+        closeTrustModal();
+      } catch (e) {
+        alert(`Failed to save trust: ${e}`);
+      }
+    }
+
+    document.getElementById("trust-modal").addEventListener("click", (e) => {
+      if (e.target.id === "trust-modal") closeTrustModal();
+    });
   </script>
 </body>
-
 </html>

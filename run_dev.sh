@@ -1,6 +1,10 @@
 #!/bin/sh
 # Kill any process listening on port 8080
-PID=$(lsof -ti:8080)
+
+set -ex
+
+PID=$(lsof -ti:8080 2>/dev/null || true)
+
 if [ -n "$PID" ]; then
   echo "Killing process $PID on port 8080..."
   kill -9 $PID
@@ -18,10 +22,10 @@ fi
 
 # Double check
 if lsof -ti:8080 > /dev/null; then
-  echo "ERROR: Port 8080 is still in use!"
-  exit 1
+  echo "WARNING: Port 8080 is still in use; continuing without kill."
 fi
 
 # Start the application
 echo "Starting application..."
-APP_ENV=dev APP_USER=air ./tmp/main
+APP_ENV=dev APP_USER=air air
+ 

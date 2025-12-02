@@ -6,23 +6,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NoClickOps Findings</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/nav.js"></script>
 </head>
 
 <body>
   <div class="layout-dashboard">
     <aside>
-      <div class="brand">
-        <div class="brand-icon">N</div>
-        <span>NoClickOps</span>
-      </div>
-
-      <div class="nav-group">
-        <div class="nav-label">Platform</div>
-        <a class="nav-link" href="/dashboard.html">Dashboard</a>
-        <a class="nav-link active" href="/findings.html">Findings</a>
-        <a class="nav-link" href="/scanners.html">Scanners</a>
-        <a class="nav-link" href="/docs.html">Docs</a>
-      </div>
+      <div id="nav-container"></div>
 
       <div style="margin-top:auto;">
         <button id="logout-btn" class="btn btn-secondary" style="width:100%;">Logout</button>
@@ -34,6 +24,16 @@
         <div>
           <h1 class="page-title">Findings</h1>
           <p class="page-desc" id="findings-meta">Loading findings...</p>
+        </div>
+        <div style="display:flex;gap:12px;align-items:flex-end;">
+          <div class="input-group" style="min-width:140px;">
+            <label class="input-label">Trusted</label>
+            <select id="trusted-filter">
+              <option value="">All</option>
+              <option value="yes">Yes</option>
+              <option value="no">No</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -61,6 +61,8 @@
   </div>
 
   <script>
+    mountNav('findings');
+
     let token = localStorage.getItem("noclickops_token") || "";
     const err = document.getElementById("err");
     const logoutBtn = document.getElementById("logout-btn");
@@ -100,7 +102,14 @@
     }
 
     function renderFindings() {
-      const sorted = [...currentFindings].sort((a, b) => {
+      const trustFilter = document.getElementById("trusted-filter").value;
+      const filtered = currentFindings.filter(f => {
+        if (!trustFilter) return true;
+        const trusted = !!f.trusted;
+        return trustFilter === "yes" ? trusted : !trusted;
+      });
+
+      const sorted = [...filtered].sort((a, b) => {
         const av = a[sortKey] || "";
         const bv = b[sortKey] || "";
         if (av < bv) return -1 * sortDir;
@@ -169,6 +178,7 @@
     logoutBtn.addEventListener("click", redirectToLogin);
 
     setupSort();
+    document.getElementById("trusted-filter").addEventListener("change", renderFindings);
     if (token) loadFindings(); else redirectToLogin();
   </script>
 </body>

@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NoClickOps Docs</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/nav.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
   <style>
     .markdown-body pre {
@@ -29,18 +30,7 @@
 <body>
   <div class="layout-dashboard">
     <aside>
-      <div class="brand">
-        <div class="brand-icon">N</div>
-        <span>NoClickOps</span>
-      </div>
-
-      <div class="nav-group">
-        <div class="nav-label">Platform</div>
-        <a class="nav-link" href="/dashboard.html">Dashboard</a>
-        <a class="nav-link" href="/findings.html">Findings</a>
-        <a class="nav-link" href="/scanners.html">Scanners</a>
-        <a class="nav-link active" href="/docs.html">Docs</a>
-      </div>
+      <div id="nav-container"></div>
 
       <div class="nav-group">
         <div class="nav-label">Documentation</div>
@@ -81,6 +71,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/terraform.min.js"></script>
   <script>
     const logoutBtn = document.getElementById("logout-btn");
+    mountNav('docs');
 
     // Configure marked to rely on client-side highlighting
     marked.setOptions({

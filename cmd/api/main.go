@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -55,6 +56,24 @@ type Tenant struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	Users     []User
 	Scanners  []Scanner
+}
+
+type TrustedUser struct {
+	ID        uint      `json:"id" gorm:"primaryKey"`
+	TenantID  uint      `json:"tenant_id" gorm:"index"`
+	Pattern   string    `json:"pattern" gorm:"size:256"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type TrustedRule struct {
+	ID              uint      `json:"id" gorm:"primaryKey"`
+	TenantID        uint      `json:"tenant_id" gorm:"index"`
+	UserPattern     string    `json:"user_pattern" gorm:"size:256"`
+	ResourcePattern string    `json:"resource_pattern" gorm:"size:256"`
+	VerbPattern     string    `json:"verb_pattern" gorm:"size:256"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type User struct {
@@ -117,7 +136,7 @@ func main() {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 
-	if err := db.AutoMigrate(&Tenant{}, &User{}, &Scanner{}); err != nil {
+	if err := db.AutoMigrate(&Tenant{}, &User{}, &Scanner{}, &TrustedUser{}, &TrustedRule{}); err != nil {
 		log.Fatalf("migration failed: %v", err)
 	}
 
@@ -141,7 +160,8 @@ func main() {
 	}
 
 	router := gin.Default()
-	router.Static("/static", "web")
+	staticDir := resolveDir("web/static")
+	router.Static("/static", staticDir)
 	router.StaticFile("/", "web/index.html")
 	router.StaticFile("/dashboard", "web/dashboard.html")
 	router.StaticFile("/dashboard.html", "web/dashboard.html")
@@ -151,6 +171,10 @@ func main() {
 	router.StaticFile("/findings.html", "web/findings.html")
 	router.StaticFile("/docs", "web/docs.html")
 	router.StaticFile("/docs.html", "web/docs.html")
+	router.StaticFile("/trusts", "web/trusts.html")
+	router.StaticFile("/trusts.html", "web/trusts.html")
+	router.StaticFile("/nav.html", "web/nav.html")
+	router.StaticFile("/favicon.ico", "web/favicon.ico")
 	docDir := resolveDir("docs")
 	router.Static("/docs/assets", docDir)
 	router.Static("/docs/md", docDir)
@@ -182,11 +206,16 @@ func main() {
 	protected.GET("/scanners/:name/map", app.handleScannerMap)
 	// backward compatibility
 	protected.GET("/scanners/:name/kube-map", app.handleScannerMap)
+	protected.GET("/trusts", app.handleTrustsList)
+	protected.POST("/trusts", app.handleTrustsCreate)
+	protected.PUT("/trusts/:id", app.handleTrustsUpdate)
+	protected.DELETE("/trusts/:id", app.handleTrustsDelete)
 
 	addr := ":8080"
 	log.Printf("API listening on %s", addr)
 	if app.deploy == "kubernetes" {
 		go func() {
+
 			// Initial reconciliation
 			if err := app.ensureAllDeployments(); err != nil {
 				log.Printf("error ensuring deployments: %v", err)
@@ -545,6 +574,12 @@ func (a *app) handleScannerDelete(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "scanner not found"})
 		return
 	}
+	var tenant Tenant
+	if err := a.db.WithContext(c.Request.Context()).First(&tenant, principal.TenantID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "tenant not found"})
+		return
+	}
+	names := namesForScanner(scanner.Name)
 
 	// Delete DB record
 	if err := a.db.WithContext(c.Request.Context()).Delete(&scanner).Error; err != nil {
@@ -554,14 +589,16 @@ func (a *app) handleScannerDelete(c *gin.Context) {
 
 	// Cleanup k8s resources if enabled
 	if a.deploy == "kubernetes" && a.kube != nil {
-		ns := namespaceFor(principal.TenantID, scanner.Name)
+		ns := namespaceFor(tenant.Name)
 		go func() {
 			grace := int64(0)
-			_ = a.kube.AppsV1().Deployments(ns).Delete(context.Background(), "scanner", metav1.DeleteOptions{GracePeriodSeconds: &grace})
-			_ = a.kube.CoreV1().ConfigMaps(ns).Delete(context.Background(), "scanner-config", metav1.DeleteOptions{})
-			_ = a.kube.CoreV1().Secrets(ns).Delete(context.Background(), "scanner-secret", metav1.DeleteOptions{})
-			_ = a.kube.CoreV1().Namespaces().Delete(context.Background(), ns, metav1.DeleteOptions{})
-			log.Printf("deleted k8s resources for scanner %s", scanner.Name)
+			_ = a.kube.AppsV1().Deployments(ns).Delete(context.Background(), names.deploy, metav1.DeleteOptions{GracePeriodSeconds: &grace})
+			_ = a.kube.CoreV1().ConfigMaps(ns).Delete(context.Background(), names.cm, metav1.DeleteOptions{})
+			_ = a.kube.CoreV1().Secrets(ns).Delete(context.Background(), names.secret, metav1.DeleteOptions{})
+			_ = a.kube.CoreV1().Services(ns).Delete(context.Background(), names.svc, metav1.DeleteOptions{})
+			_ = a.kube.NetworkingV1().NetworkPolicies(ns).Delete(context.Background(), names.np, metav1.DeleteOptions{})
+			_ = a.kube.CoreV1().ServiceAccounts(ns).Delete(context.Background(), names.sa, metav1.DeleteOptions{})
+			log.Printf("deleted k8s resources for scanner %s in namespace %s", scanner.Name, ns)
 		}()
 	} else {
 		// stop local process if tracked
@@ -665,9 +702,29 @@ func (a *app) spawnScannerProcess(ctx context.Context, tenantID uint, scanner *S
 }
 
 func sanitize(in string) string {
-	re := regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
-	s := re.ReplaceAllString(in, "-")
-	return strings.Trim(s, "-")
+	return sanitizeLimited(in, 63)
+}
+
+func sanitizeLimited(in string, maxLen int) string {
+	s := strings.ToLower(in)
+	re := regexp.MustCompile(`[^a-z0-9.-]+`)
+	s = re.ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-.")
+	if len(s) > maxLen {
+		s = s[:maxLen]
+		s = strings.Trim(s, "-.")
+	}
+	if s == "" {
+		return "noclickops"
+	}
+	return s
+}
+
+func k8sName(prefix, name string) string {
+	if strings.TrimSpace(name) == "" {
+		return sanitizeLimited(prefix, 63)
+	}
+	return sanitizeLimited(fmt.Sprintf("%s-%s", prefix, name), 63)
 }
 
 type meResponse struct {
@@ -700,15 +757,21 @@ func (a *app) handleScannerHealth(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "scanner not found"})
 		return
 	}
+	names := namesForScanner(scanner.Name)
+	var tenant Tenant
+	if err := a.db.WithContext(c.Request.Context()).First(&tenant, principal.TenantID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "tenant not found"})
+		return
+	}
 
 	if a.deploy == "kubernetes" {
-		ns := namespaceFor(principal.TenantID, scanner.Name)
+		ns := namespaceFor(tenant.Name)
 		// Check deployment status
 		if a.kube == nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "kube client not initialized"})
 			return
 		}
-		dep, err := a.kube.AppsV1().Deployments(ns).Get(c.Request.Context(), "scanner", metav1.GetOptions{})
+		dep, err := a.kube.AppsV1().Deployments(ns).Get(c.Request.Context(), names.deploy, metav1.GetOptions{})
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"status": "not_found", "error": err.Error()})
 			return
@@ -760,11 +823,16 @@ func (a *app) handleScannerLogs(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "scanner not found"})
 		return
 	}
+	var tenant Tenant
+	if err := a.db.WithContext(c.Request.Context()).First(&tenant, principal.TenantID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "tenant not found"})
+		return
+	}
 	if a.deploy != "kubernetes" || a.kube == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "logs available only in kubernetes mode"})
 		return
 	}
-	ns := namespaceFor(principal.TenantID, scanner.Name)
+	ns := namespaceFor(tenant.Name)
 	pods, err := a.kube.CoreV1().Pods(ns).List(c.Request.Context(), metav1.ListOptions{
 		LabelSelector: "app=noclickops-scanner,scanner=" + sanitize(scanner.Name),
 	})
@@ -815,11 +883,16 @@ func (a *app) handleScannerFindings(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "scanner not found"})
 		return
 	}
+	var tenant Tenant
+	if err := a.db.WithContext(c.Request.Context()).First(&tenant, principal.TenantID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "tenant not found"})
+		return
+	}
 	if a.deploy != "kubernetes" || a.kube == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "findings available only in kubernetes mode"})
 		return
 	}
-	ns := namespaceFor(principal.TenantID, scanner.Name)
+	ns := namespaceFor(tenant.Name)
 	pods, err := a.kube.CoreV1().Pods(ns).List(c.Request.Context(), metav1.ListOptions{
 		LabelSelector: "app=noclickops-scanner,scanner=" + sanitize(scanner.Name),
 	})
@@ -923,8 +996,13 @@ func (a *app) handleScannerMap(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "scanner not found"})
 		return
 	}
+	var tenant Tenant
+	if err := a.db.WithContext(c.Request.Context()).First(&tenant, principal.TenantID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "tenant not found"})
+		return
+	}
 	if a.deploy == "kubernetes" && a.kube != nil {
-		ns := namespaceFor(principal.TenantID, scanner.Name)
+		ns := namespaceFor(tenant.Name)
 		pods, err := a.kube.CoreV1().Pods(ns).List(c.Request.Context(), metav1.ListOptions{
 			LabelSelector: "app=noclickops-scanner,scanner=" + sanitize(scanner.Name),
 		})
@@ -946,7 +1024,8 @@ func (a *app) handleScannerMap(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.Data(http.StatusOK, "application/json", bytes)
+		filtered := a.applyTrustedUserFilter(c.Request.Context(), tenant.ID, bytes)
+		c.Data(http.StatusOK, "application/json", filtered)
 		return
 	}
 
@@ -962,11 +1041,247 @@ func (a *app) handleScannerMap(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.Data(resp.StatusCode, "application/json", body)
+	filtered := a.applyTrustedUserFilter(c.Request.Context(), tenant.ID, body)
+	c.Data(resp.StatusCode, "application/json", filtered)
 }
 
-func namespaceFor(tenantID uint, scannerName string) string {
-	return fmt.Sprintf("scanner-%d-%s", tenantID, sanitize(scannerName))
+func (a *app) applyTrustedUserFilter(ctx context.Context, tenantID uint, body []byte) []byte {
+	// Previously we filtered trusted entries from the map response.
+	// Now we keep all entries and rely on the UI to annotate trust matches.
+	return body
+}
+
+func compilePatterns(patterns []string) []*regexp.Regexp {
+	var res []*regexp.Regexp
+	for _, pat := range patterns {
+		p := strings.TrimSpace(pat)
+		if p == "" {
+			continue
+		}
+		var re *regexp.Regexp
+		if strings.HasPrefix(p, "/") && strings.HasSuffix(p, "/") && len(p) > 2 {
+			inner := p[1 : len(p)-1]
+			r, err := regexp.Compile("(?i)" + inner)
+			if err != nil {
+				continue
+			}
+			re = r
+		} else {
+			escaped := regexp.QuoteMeta(p)
+			escaped = strings.ReplaceAll(escaped, "\\*", ".*")
+			escaped = strings.ReplaceAll(escaped, "\\?", ".")
+			r, err := regexp.Compile("(?i)^" + escaped + "$")
+			if err != nil {
+				continue
+			}
+			re = r
+		}
+		res = append(res, re)
+	}
+	return res
+}
+
+func matchesAny(val string, regexes []*regexp.Regexp) bool {
+	for _, r := range regexes {
+		if r.MatchString(val) {
+			return true
+		}
+	}
+	return false
+}
+
+type trustRuleCompiled struct {
+	user     *regexp.Regexp
+	resource *regexp.Regexp
+	verb     *regexp.Regexp
+}
+
+func (a *app) trustedRules(ctx context.Context, tenantID uint) ([]trustRuleCompiled, error) {
+	var list []TrustedRule
+	if err := a.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Find(&list).Error; err != nil {
+		return nil, err
+	}
+	var compiled []trustRuleCompiled
+	for _, r := range list {
+		ur := compilePatterns([]string{fallbackWildcard(r.UserPattern)})
+		rr := compilePatterns([]string{fallbackWildcard(r.ResourcePattern)})
+		vr := compilePatterns([]string{fallbackWildcard(r.VerbPattern)})
+		if len(ur) == 0 || len(rr) == 0 || len(vr) == 0 {
+			continue
+		}
+		compiled = append(compiled, trustRuleCompiled{
+			user:     ur[0],
+			resource: rr[0],
+			verb:     vr[0],
+		})
+	}
+	return compiled, nil
+}
+
+func fallbackWildcard(s string) string {
+	v := strings.TrimSpace(s)
+	if v == "" || strings.EqualFold(v, "all") {
+		return "*"
+	}
+	return v
+}
+
+func ruleMatches(rules []trustRuleCompiled, user, resource, verb string) bool {
+	for _, r := range rules {
+		if r.user.MatchString(user) && r.resource.MatchString(resource) && r.verb.MatchString(verb) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *app) handleTrustsList(c *gin.Context) {
+	principal := c.MustGet("principal").(*User)
+	var list []TrustedRule
+	if err := a.db.WithContext(c.Request.Context()).
+		Where("tenant_id = ?", principal.TenantID).
+		Order("id asc").
+		Find(&list).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, list)
+}
+
+func (a *app) handleTrustsCreate(c *gin.Context) {
+	principal := c.MustGet("principal").(*User)
+	var req struct {
+		UserPattern     string `json:"user_pattern"`
+		ResourcePattern string `json:"resource_pattern"`
+		VerbPattern     string `json:"verb_pattern"`
+	}
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	req.UserPattern = strings.TrimSpace(req.UserPattern)
+	req.ResourcePattern = strings.TrimSpace(req.ResourcePattern)
+	req.VerbPattern = strings.TrimSpace(req.VerbPattern)
+	if req.UserPattern == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user_pattern is required"})
+		return
+	}
+	if req.ResourcePattern == "" {
+		req.ResourcePattern = "*"
+	}
+	if req.VerbPattern == "" {
+		req.VerbPattern = "*"
+	}
+	tr := TrustedRule{
+		TenantID:        principal.TenantID,
+		UserPattern:     req.UserPattern,
+		ResourcePattern: req.ResourcePattern,
+		VerbPattern:     req.VerbPattern,
+	}
+	if err := a.db.WithContext(c.Request.Context()).Create(&tr).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, tr)
+}
+
+func (a *app) handleTrustsUpdate(c *gin.Context) {
+	principal := c.MustGet("principal").(*User)
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil || id == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var tr TrustedRule
+	if err := a.db.WithContext(c.Request.Context()).
+		Where("id = ? AND tenant_id = ?", id, principal.TenantID).
+		First(&tr).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	var req struct {
+		UserPattern     string `json:"user_pattern"`
+		ResourcePattern string `json:"resource_pattern"`
+		VerbPattern     string `json:"verb_pattern"`
+	}
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if strings.TrimSpace(req.UserPattern) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user_pattern is required"})
+		return
+	}
+	tr.UserPattern = strings.TrimSpace(req.UserPattern)
+	tr.ResourcePattern = strings.TrimSpace(req.ResourcePattern)
+	if tr.ResourcePattern == "" {
+		tr.ResourcePattern = "*"
+	}
+	tr.VerbPattern = strings.TrimSpace(req.VerbPattern)
+	if tr.VerbPattern == "" {
+		tr.VerbPattern = "*"
+	}
+	if err := a.db.WithContext(c.Request.Context()).Save(&tr).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, tr)
+}
+
+func (a *app) handleTrustsDelete(c *gin.Context) {
+	principal := c.MustGet("principal").(*User)
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil || id == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var tr TrustedRule
+	if err := a.db.WithContext(c.Request.Context()).
+		Where("id = ? AND tenant_id = ?", id, principal.TenantID).
+		First(&tr).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := a.db.WithContext(c.Request.Context()).Delete(&tr).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func namespaceFor(tenantName string) string {
+	return sanitizeLimited(tenantName, 63)
+}
+
+type k8sNames struct {
+	deploy string
+	svc    string
+	sa     string
+	cm     string
+	secret string
+	np     string
+}
+
+func namesForScanner(scannerName string) k8sNames {
+	base := k8sName("scanner", scannerName)
+	return k8sNames{
+		deploy: base,
+		svc:    k8sName(base, "svc"),
+		sa:     k8sName(base, "sa"),
+		cm:     k8sName(base, "config"),
+		secret: k8sName(base, "secret"),
+		np:     k8sName(base, "np"),
+	}
 }
 
 func ifThen(cond bool, a, b string) string {
@@ -1014,7 +1329,9 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 	if err := a.db.WithContext(ctx).First(&tenant, tenantID).Error; err != nil {
 		return fmt.Errorf("load tenant: %w", err)
 	}
-	ns := namespaceFor(tenant.ID, scanner.Name)
+	ns := namespaceFor(tenant.Name)
+	names := namesForScanner(scanner.Name)
+	log.Printf("reconciling scanner %s (tenant=%s id=%d) in namespace %s", scanner.Name, tenant.Name, tenant.ID, ns)
 	labels := map[string]string{
 		"app":     "noclickops-scanner",
 		"scanner": sanitize(scanner.Name),
@@ -1036,17 +1353,19 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 		if _, createErr := a.kube.CoreV1().Namespaces().Create(ctx, nsObj, metav1.CreateOptions{}); createErr != nil {
 			log.Printf("namespace create %s: %v", ns, createErr)
 		}
+	} else {
+		log.Printf("namespace %s already exists", ns)
 	}
 
 	// ServiceAccount
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "scanner",
+			Name:      names.sa,
 			Namespace: ns,
 			Labels:    labels,
 		},
 	}
-	if _, err := a.kube.CoreV1().ServiceAccounts(ns).Get(ctx, "scanner", metav1.GetOptions{}); err == nil {
+	if _, err := a.kube.CoreV1().ServiceAccounts(ns).Get(ctx, names.sa, metav1.GetOptions{}); err == nil {
 		_, _ = a.kube.CoreV1().ServiceAccounts(ns).Update(ctx, sa, metav1.UpdateOptions{})
 	} else {
 		_, _ = a.kube.CoreV1().ServiceAccounts(ns).Create(ctx, sa, metav1.CreateOptions{})
@@ -1055,7 +1374,7 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 	// NetworkPolicy (deny ingress from other namespaces)
 	np := &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "deny-external-ingress",
+			Name:      names.np,
 			Namespace: ns,
 			Labels:    labels,
 		},
@@ -1075,7 +1394,7 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 			},
 		},
 	}
-	if _, err := a.kube.NetworkingV1().NetworkPolicies(ns).Get(ctx, "deny-external-ingress", metav1.GetOptions{}); err == nil {
+	if _, err := a.kube.NetworkingV1().NetworkPolicies(ns).Get(ctx, names.np, metav1.GetOptions{}); err == nil {
 		_, _ = a.kube.NetworkingV1().NetworkPolicies(ns).Update(ctx, np, metav1.UpdateOptions{})
 	} else {
 		_, _ = a.kube.NetworkingV1().NetworkPolicies(ns).Create(ctx, np, metav1.CreateOptions{})
@@ -1084,7 +1403,7 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 	// Service
 	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "scanner",
+			Name:      names.svc,
 			Namespace: ns,
 			Labels:    labels,
 		},
@@ -1100,7 +1419,7 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 			},
 		},
 	}
-	if _, err := a.kube.CoreV1().Services(ns).Get(ctx, "scanner", metav1.GetOptions{}); err == nil {
+	if _, err := a.kube.CoreV1().Services(ns).Get(ctx, names.svc, metav1.GetOptions{}); err == nil {
 		_, _ = a.kube.CoreV1().Services(ns).Update(ctx, svc, metav1.UpdateOptions{})
 	} else {
 		_, _ = a.kube.CoreV1().Services(ns).Create(ctx, svc, metav1.CreateOptions{})
@@ -1153,7 +1472,7 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 	yml, _ := yaml.Marshal(cfgMap)
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "scanner-config",
+			Name:      names.cm,
 			Namespace: ns,
 			Labels:    labels,
 		},
@@ -1161,14 +1480,14 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 			"config.yaml": string(yml),
 		},
 	}
-	if _, err := a.kube.CoreV1().ConfigMaps(ns).Get(ctx, "scanner-config", metav1.GetOptions{}); err == nil {
+	if _, err := a.kube.CoreV1().ConfigMaps(ns).Get(ctx, names.cm, metav1.GetOptions{}); err == nil {
 		_, _ = a.kube.CoreV1().ConfigMaps(ns).Update(ctx, cm, metav1.UpdateOptions{})
 	} else {
 		_, _ = a.kube.CoreV1().ConfigMaps(ns).Create(ctx, cm, metav1.CreateOptions{})
 	}
 
 	// Secret for credentials, if provided
-	secretName := "scanner-secret"
+	secretName := names.secret
 	secretData := map[string][]byte{}
 
 	// Load existing secret data to preserve keys not being updated
@@ -1267,7 +1586,7 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 
 	deploy := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "scanner",
+			Name:      names.deploy,
 			Namespace: ns,
 			Labels:    labels,
 		},
@@ -1283,7 +1602,7 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 					},
 				},
 				Spec: corev1.PodSpec{
-					ServiceAccountName: "scanner",
+					ServiceAccountName: names.sa,
 					Containers: []corev1.Container{
 						{
 							Name:            "scanner",
@@ -1295,7 +1614,7 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 								if hostADCPath != "" {
 									mounts = append(mounts, corev1.VolumeMount{
 										Name:      "gcp-adc-host",
-										MountPath: "/var/secrets/adc.json",
+										MountPath: "/home/noclickops/.config/gcloud/application_default_credentials.json",
 										ReadOnly:  true,
 									})
 								}
@@ -1321,12 +1640,12 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 										corev1.EnvVar{Name: "AWS_DEFAULT_REGION", Value: regionEnv},
 									)
 								}
-								if hostADCPath != "" {
-									envs = append(envs, corev1.EnvVar{
-										Name:  "GOOGLE_APPLICATION_CREDENTIALS",
-										Value: "/var/secrets/adc.json",
-									})
-								}
+								// if hostADCPath != "" {
+								// 	envs = append(envs, corev1.EnvVar{
+								// 		Name:  "GOOGLE_APPLICATION_CREDENTIALS",
+								// 		Value: "/var/secrets/adc.json",
+								// 	})
+								// }
 								if jiraEmail != "" {
 									envs = append(envs, corev1.EnvVar{Name: "JIRA_EMAIL", Value: jiraEmail})
 								}
@@ -1350,7 +1669,7 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 								Name: "config",
 								VolumeSource: corev1.VolumeSource{
 									ConfigMap: &corev1.ConfigMapVolumeSource{
-										LocalObjectReference: corev1.LocalObjectReference{Name: "scanner-config"},
+										LocalObjectReference: corev1.LocalObjectReference{Name: names.cm},
 									},
 								},
 							},
@@ -1374,7 +1693,7 @@ func (a *app) ensureKubeDeployment(ctx context.Context, tenantID uint, scanner *
 		},
 	}
 
-	if _, err := a.kube.AppsV1().Deployments(ns).Get(ctx, "scanner", metav1.GetOptions{}); err == nil {
+	if _, err := a.kube.AppsV1().Deployments(ns).Get(ctx, names.deploy, metav1.GetOptions{}); err == nil {
 		_, err = a.kube.AppsV1().Deployments(ns).Update(ctx, deploy, metav1.UpdateOptions{})
 		return err
 	}
