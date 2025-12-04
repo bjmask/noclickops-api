@@ -406,3 +406,8 @@ pre, code {
 .trust-miss {
   background: #e74c3c;
 }
+.resource-na {
+  position: relative;
+  text-decoration: underline dotted;
+  cursor: help;
+}

@@ -312,6 +312,7 @@
     const logBox = document.getElementById("log-box");
     const followBtn = document.getElementById("follow-logs");
     const logoutBtn = document.getElementById("logout-btn");
+    const tabStorageKey = `scanner_tab_${name}`;
 
     let logController = null;
     let statusInterval = null;
@@ -656,7 +657,7 @@
         tr.style.borderBottom = "1px solid rgba(255,255,255,0.05)";
         tr.innerHTML = `
             <td style="padding:8px;word-break:break-word;">${row.user}</td>
-            <td style="padding:8px;word-break:break-word;">${row.resource}</td>
+            <td style="padding:8px;word-break:break-word;">${row.resource === "N/A" ? `<span class="resource-na" title="This action does not include a resource type/name">N/A</span>` : row.resource}</td>
             <td style="padding:8px;word-break:break-word;">${row.verb}</td>
             <td style="padding:8px;text-align:right;">${row.count}</td>
             <td style="padding:8px;cursor:pointer;" onclick="openTrustModal(${trustMatch ? `'${row.user}','${row.resource}','${row.verb}','${trustMatch.id}'` : `'${row.user}','${row.resource}','${row.verb}',''`})">
@@ -772,7 +773,7 @@
         return `
           <tr>
             <td style="padding:8px;word-break:break-word;">${row.user}</td>
-            <td style="padding:8px;word-break:break-word;">${row.resource}</td>
+            <td style="padding:8px;word-break:break-word;">${row.resource === "N/A" ? `<span class="resource-na" title="This action does not include a resource type/name">N/A</span>` : row.resource}</td>
             <td style="padding:8px;word-break:break-word;">${row.verb}</td>
             <td style="padding:8px;text-align:right;">${row.count}</td>
             <td style="padding:8px;cursor:pointer;" onclick="openTrustModal(${trustMatch ? `'${row.user}','${row.resource}','${row.verb}','${trustMatch.id}'` : `'${row.user}','${row.resource}','${row.verb}',''`})"><span class="trust-dot ${trustMatch ? 'trust-ok' : 'trust-miss'}" title="${trustMatch ? `Matched by trust ${trustMatch.label}` : 'No trust rule matched'}"></span></td>
@@ -984,10 +985,27 @@
         findingsBtn.classList.remove("btn-primary");
         configBtn.classList.add("btn-primary");
       }
+      // persist selection
+      try {
+        localStorage.setItem(tabStorageKey, tab);
+      } catch (_) {}
     }
 
     // default active tab
-    switchTab("config");
+    (function initTab() {
+      let initial = "config";
+      try {
+        const stored = localStorage.getItem(tabStorageKey);
+        if (stored === "findings" || stored === "config") {
+          initial = stored;
+        }
+      } catch (_) {}
+      // allow hash #findings override
+      if (window.location.hash === "#findings") {
+        initial = "findings";
+      }
+      switchTab(initial);
+    })();
   </script>
   <div id="trust-modal" class="modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);align-items:center;justify-content:center;z-index:1000;">
     <div class="modal-content" style="background:#111827;border:1px solid var(--border);border-radius:8px;padding:16px;width:420px;max-width:90%;color:var(--text-main);">

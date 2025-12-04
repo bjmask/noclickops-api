@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NoClickOps Port Scanning</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/nav.js"></script>
+</head>
+
+<body>
+  <div class="layout-dashboard">
+    <aside>
+      <div id="nav-container"></div>
+      <div style="margin-top:auto;">
+        <button id="logout-btn" class="btn btn-secondary" style="width:100%;">Logout</button>
+      </div>
+    </aside>
+
+    <main>
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Port Scanning</h1>
+          <p class="page-desc" id="meta">Detecting sources probing multiple ports.</p>
+        </div>
+      </div>
+
+      <div class="card" style="padding:0;overflow:hidden;">
+        <div class="table-container" style="border:none;border-radius:0;">
+          <table id="ps-table" style="width:100%; table-layout: fixed;">
+            <thead>
+              <tr>
+                <th style="cursor:pointer;" data-sort="source">Source ↕</th>
+                <th style="cursor:pointer;" data-sort="unique_ports">Unique Ports ↕</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="error" id="err" style="display:none;color:var(--accent-danger);margin-top:20px;"></div>
+    </main>
+  </div>
+
+  <script>
+    mountNav('portscans');
+
+    let token = localStorage.getItem("noclickops_token") || "";
+    const err = document.getElementById("err");
+    const tbody = document.querySelector("#ps-table tbody");
+    const meta = document.getElementById("meta");
+    const logoutBtn = document.getElementById("logout-btn");
+    let sortKey = "unique_ports";
+    let sortDir = -1;
+    let rows = [];
+
+    function api(path, opts = {}) {
+      const headers = opts.headers || {};
+      headers["Content-Type"] = "application/json";
+      if (token) headers["Authorization"] = "Bearer " + token;
+      return fetch(path, { ...opts, headers }).then(async res => {
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 401) {
+          redirectToLogin();
+          throw "unauthorized";
+        }
+        if (!res.ok) throw data.error || res.statusText;
+        return data;
+      });
+    }
+
+    function redirectToLogin() {
+      localStorage.removeItem("noclickops_token");
+      window.location.href = "/";
+    }
+
+    function showError(message) {
+      err.style.display = "block";
+      err.textContent = message;
+    }
+
+    function clearError() {
+      err.style.display = "none";
+    }
+
+    function render() {
+      const sorted = [...rows].sort((a, b) => {
+        let av = a[sortKey];
+        let bv = b[sortKey];
+        let cmp = 0;
+        if (typeof av === "number" && typeof bv === "number") {
+          cmp = av === bv ? 0 : (av < bv ? -1 : 1);
+        } else {
+          av = (av || "").toString().toLowerCase();
+          bv = (bv || "").toString().toLowerCase();
+          cmp = av === bv ? 0 : (av < bv ? -1 : 1);
+        }
+        return cmp * sortDir;
+      });
+      if (!sorted.length) {
+        tbody.innerHTML = `<tr><td colspan="2" class="text-center text-muted" style="padding:32px;">No suspicious port-scanning sources observed yet.</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = sorted.map(r => `
+        <tr>
+          <td>${r.source}</td>
+          <td>${r.unique_ports}</td>
+        </tr>
+      `).join("");
+    }
+
+    function setupSort() {
+      document.querySelectorAll("#ps-table th").forEach(th => {
+        th.addEventListener("click", () => {
+          const key = th.getAttribute("data-sort");
+          if (!key) return;
+          if (sortKey === key) {
+            sortDir = -sortDir;
+          } else {
+            sortKey = key;
+            sortDir = key === "unique_ports" ? -1 : 1;
+          }
+          render();
+        });
+      });
+    }
+
+    async function loadPortScans() {
+      if (!token) return redirectToLogin();
+      try {
+        clearError();
+        const data = await api("/v1/network/portscans");
+        rows = data.items || [];
+        if (data.updated_at) {
+          meta.textContent = `Sources scanning multiple ports (>5). Last updated ${new Date(data.updated_at).toLocaleString()}.`;
+        } else {
+          meta.textContent = "Sources scanning multiple ports (>5).";
+        }
+        render();
+      } catch (e) {
+        showError(e);
+      }
+    }
+
+    logoutBtn.addEventListener("click", redirectToLogin);
+    setupSort();
+    loadPortScans();
+    setInterval(loadPortScans, 15000);
+  </script>
+</body>
+
+</html>

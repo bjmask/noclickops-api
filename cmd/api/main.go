@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,12 +42,26 @@ import (
 )
 
 type Config struct {
-	DatabaseURL      string `yaml:"database_url"`
-	AdminDatabaseURL string `yaml:"admin_database_url"`
-	JWTSecret        string `yaml:"jwt_secret"`
-	DeploymentType   string `yaml:"deployment_type"` // "process" or "docker"
-	ScannerImage     string `yaml:"scanner_image"`
-	MountADCFromHost bool   `yaml:"mountApplicationDefaultCredentialsFromHost"`
+	DatabaseURL       string         `yaml:"database_url"`
+	AdminDatabaseURL  string         `yaml:"admin_database_url"`
+	JWTSecret         string         `yaml:"jwt_secret"`
+	DeploymentType    string         `yaml:"deployment_type"` // "process" or "docker"
+	ScannerImage      string         `yaml:"scanner_image"`
+	MountADCFromHost  bool           `yaml:"mountApplicationDefaultCredentialsFromHost"`
+	TrafficMonitorURL string         `yaml:"traffic_monitor_url"`
+	Findings          FindingsConfig `yaml:"findings"`
+}
+
+type FindingsConfig struct {
+	PollSeconds int            `yaml:"poll_seconds"`
+	Baseline    BaselineConfig `yaml:"baseline"`
+}
+
+type BaselineConfig struct {
+	PollSeconds    int `yaml:"poll_seconds"`
+	LearnDays      int `yaml:"learn_days"`
+	MinCount       int `yaml:"min_count"`
+	MinSpanMinutes int `yaml:"min_span_minutes"`
 }
 
 type Tenant struct {
@@ -98,23 +113,78 @@ type Scanner struct {
 }
 
 type app struct {
-	db        *gorm.DB
-	jwtSecret []byte
-	procs     map[uint]*exec.Cmd
-	mu        sync.Mutex
-	deploy    string
-	kube      *kubernetes.Clientset
-	image     string
-	mountADC  bool
+	db                *gorm.DB
+	jwtSecret         []byte
+	procs             map[uint]*exec.Cmd
+	mu                sync.Mutex
+	deploy            string
+	kube              *kubernetes.Clientset
+	image             string
+	mountADC          bool
+	trafficMonitorURL string
+	portScanMu        sync.RWMutex
+	portScans         []PortScanFinding
+	portScanUpdated   time.Time
+	portScanInterval  time.Duration
+	baselineMu        sync.RWMutex
+	baselines         map[BaselineKey]*BaselineEntry
+	baselineUpdated   time.Time
+	baselineInterval  time.Duration
+	baselineLearn     time.Duration
+	baselineMinCount  int
+	baselineMinSpan   time.Duration
+	policyCacheMu     sync.RWMutex
+	policyCache       map[string]bool
+}
+
+type PortScanFinding struct {
+	Source      string `json:"source"`
+	UniquePorts int    `json:"unique_ports"`
+}
+
+type BaselineKey struct {
+	SrcNS   string `json:"src_ns"`
+	SrcApp  string `json:"src_app"`
+	DstNS   string `json:"dst_ns"`
+	DstApp  string `json:"dst_app"`
+	DstPort int    `json:"dst_port"`
+	Proto   int    `json:"proto"`
+}
+
+type BaselineEntry struct {
+	FirstSeen time.Time `json:"first_seen"`
+	LastSeen  time.Time `json:"last_seen"`
+	Count     int       `json:"count"`
+	Baseline  bool      `json:"baseline"`
+	PolicyHit bool      `json:"policy_hit"`
 }
 
 func main() {
 	cfg := loadConfig()
+	if cfg.Findings.PollSeconds == 0 {
+		cfg.Findings.PollSeconds = 60
+	}
+	if cfg.Findings.Baseline.PollSeconds == 0 {
+		cfg.Findings.Baseline.PollSeconds = cfg.Findings.PollSeconds
+	}
+	if cfg.Findings.Baseline.LearnDays == 0 {
+		cfg.Findings.Baseline.LearnDays = 7
+	}
+	if cfg.Findings.Baseline.MinCount == 0 {
+		cfg.Findings.Baseline.MinCount = 5
+	}
+	if cfg.Findings.Baseline.MinSpanMinutes == 0 {
+		cfg.Findings.Baseline.MinSpanMinutes = 60
+	}
 
 	adminDSN := firstNonEmpty(os.Getenv("ADMIN_DATABASE_URL"), cfg.AdminDatabaseURL)
 	targetDSN := firstNonEmpty(os.Getenv("DATABASE_URL"), cfg.DatabaseURL)
 	jwtSecret := firstNonEmpty(os.Getenv("JWT_SECRET"), cfg.JWTSecret)
 	scannerImage := firstNonEmpty(os.Getenv("SCANNER_IMAGE"), cfg.ScannerImage)
+	trafficMonitorURL := firstNonEmpty(os.Getenv("TRAFFIC_MONITOR_URL"), cfg.TrafficMonitorURL)
+	if trafficMonitorURL == "" {
+		trafficMonitorURL = "http://127.0.0.1:8001/api/v1/namespaces/traffic-monitor/services/traffic-monitor:3000/proxy/api/v1/findings"
+	}
 	if scannerImage == "" {
 		scannerImage = "noclickops-scanner:latest2"
 	}
@@ -140,7 +210,22 @@ func main() {
 		log.Fatalf("migration failed: %v", err)
 	}
 
-	app := &app{db: db, jwtSecret: []byte(jwtSecret), procs: make(map[uint]*exec.Cmd), deploy: strings.ToLower(cfg.DeploymentType), image: scannerImage, mountADC: cfg.MountADCFromHost}
+	app := &app{
+		db:                db,
+		jwtSecret:         []byte(jwtSecret),
+		procs:             make(map[uint]*exec.Cmd),
+		deploy:            strings.ToLower(cfg.DeploymentType),
+		image:             scannerImage,
+		mountADC:          cfg.MountADCFromHost,
+		trafficMonitorURL: trafficMonitorURL,
+		portScanInterval:  time.Duration(cfg.Findings.PollSeconds) * time.Second,
+		baselines:         make(map[BaselineKey]*BaselineEntry),
+		baselineInterval:  time.Duration(cfg.Findings.Baseline.PollSeconds) * time.Second,
+		baselineLearn:     time.Duration(cfg.Findings.Baseline.LearnDays*24) * time.Hour,
+		baselineMinCount:  cfg.Findings.Baseline.MinCount,
+		baselineMinSpan:   time.Duration(cfg.Findings.Baseline.MinSpanMinutes) * time.Minute,
+		policyCache:       make(map[string]bool),
+	}
 
 	if app.deploy == "" {
 		app.deploy = "process"
@@ -159,6 +244,9 @@ func main() {
 		log.Printf("kubernetes deployment mode enabled")
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	router := gin.Default()
 	staticDir := resolveDir("web/static")
 	router.Static("/static", staticDir)
@@ -169,6 +257,10 @@ func main() {
 	router.StaticFile("/scanners.html", "web/scanners.html")
 	router.StaticFile("/findings", "web/findings.html")
 	router.StaticFile("/findings.html", "web/findings.html")
+	router.StaticFile("/network", "web/network.html")
+	router.StaticFile("/network.html", "web/network.html")
+	router.StaticFile("/portscans", "web/portscans.html")
+	router.StaticFile("/portscans.html", "web/portscans.html")
 	router.StaticFile("/docs", "web/docs.html")
 	router.StaticFile("/docs.html", "web/docs.html")
 	router.StaticFile("/trusts", "web/trusts.html")
@@ -210,6 +302,12 @@ func main() {
 	protected.POST("/trusts", app.handleTrustsCreate)
 	protected.PUT("/trusts/:id", app.handleTrustsUpdate)
 	protected.DELETE("/trusts/:id", app.handleTrustsDelete)
+
+	protected.GET("/network/findings", app.handleNetworkFindings)
+	protected.GET("/network/schema", app.handleNetworkSchema)
+	protected.GET("/network/keys", app.handleNetworkKeys)
+	protected.GET("/network/portscans", app.handlePortScans)
+	protected.GET("/network/baseline", app.handleBaseline)
 
 	addr := ":8080"
 	log.Printf("API listening on %s", addr)
@@ -253,6 +351,13 @@ func main() {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
+	if app.trafficMonitorURL != "" && app.portScanInterval > 0 {
+		go app.startPortScanWatcher(ctx)
+	}
+	if app.trafficMonitorURL != "" && app.baselineInterval > 0 {
+		go app.startBaselineWatcher(ctx)
+	}
+
 	go func() {
 		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("listen: %s\n", err)
@@ -271,9 +376,10 @@ func main() {
 
 	// The context is used to inform the server it has 2 seconds to finish
 	// the request it is currently handling
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer shutdownCancel()
+	cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Fatal("Server forced to shutdown: ", err)
 	}
 
@@ -1282,6 +1388,486 @@ func namesForScanner(scannerName string) k8sNames {
 		secret: k8sName(base, "secret"),
 		np:     k8sName(base, "np"),
 	}
+}
+
+func (a *app) handleNetworkFindings(c *gin.Context) {
+	if a.trafficMonitorURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "traffic monitor URL not configured"})
+		return
+	}
+	targetURL := a.trafficMonitorURL
+	raw := c.Request.URL.RawQuery
+	if raw != "" {
+		sep := "?"
+		if strings.Contains(targetURL, "?") {
+			sep = "&"
+		}
+		targetURL = targetURL + sep + raw
+	}
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, targetURL, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		c.JSON(resp.StatusCode, gin.H{"error": string(body)})
+		return
+	}
+	c.Data(http.StatusOK, "application/json", body)
+}
+
+func (a *app) handleNetworkSchema(c *gin.Context) {
+	if a.trafficMonitorURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "traffic monitor URL not configured"})
+		return
+	}
+	// derive schema endpoint from findings URL
+	schemaURL := strings.Replace(a.trafficMonitorURL, "/findings", "/schemas", 1)
+	raw := c.Request.URL.RawQuery
+	if raw != "" {
+		sep := "?"
+		if strings.Contains(schemaURL, "?") {
+			sep = "&"
+		}
+		schemaURL = schemaURL + sep + raw
+	}
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, schemaURL, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		c.JSON(resp.StatusCode, gin.H{"error": string(body)})
+		return
+	}
+	c.Data(http.StatusOK, "application/json", body)
+}
+
+func (a *app) handleNetworkKeys(c *gin.Context) {
+	if a.trafficMonitorURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "traffic monitor URL not configured"})
+		return
+	}
+	keysURL := strings.Replace(a.trafficMonitorURL, "/findings", "/findings/keys", 1)
+	raw := c.Request.URL.RawQuery
+	if raw != "" {
+		sep := "?"
+		if strings.Contains(keysURL, "?") {
+			sep = "&"
+		}
+		keysURL = keysURL + sep + raw
+	}
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, keysURL, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		c.JSON(resp.StatusCode, gin.H{"error": string(body)})
+		return
+	}
+	c.Data(http.StatusOK, "application/json", body)
+}
+
+func (a *app) handlePortScans(c *gin.Context) {
+	a.portScanMu.RLock()
+	items := append([]PortScanFinding(nil), a.portScans...)
+	updated := a.portScanUpdated
+	a.portScanMu.RUnlock()
+	c.JSON(http.StatusOK, gin.H{
+		"items":      items,
+		"updated_at": updated,
+		"interval_s": int(a.portScanInterval.Seconds()),
+	})
+}
+
+func (a *app) handleBaseline(c *gin.Context) {
+	a.baselineMu.RLock()
+	items := make([]map[string]interface{}, 0, len(a.baselines))
+	for k, v := range a.baselines {
+		items = append(items, map[string]interface{}{
+			"src_ns":     k.SrcNS,
+			"src_app":    k.SrcApp,
+			"dst_ns":     k.DstNS,
+			"dst_app":    k.DstApp,
+			"dst_port":   k.DstPort,
+			"proto":      k.Proto,
+			"first_seen": v.FirstSeen,
+			"last_seen":  v.LastSeen,
+			"count":      v.Count,
+			"baseline":   v.Baseline,
+			"policy_hit": v.PolicyHit,
+		})
+	}
+	updated := a.baselineUpdated
+	a.baselineMu.RUnlock()
+	c.JSON(http.StatusOK, gin.H{
+		"items":      items,
+		"updated_at": updated,
+		"interval_s": int(a.baselineInterval.Seconds()),
+	})
+}
+
+func (a *app) startPortScanWatcher(ctx context.Context) {
+	if a.trafficMonitorURL == "" || a.portScanInterval <= 0 {
+		return
+	}
+	ticker := time.NewTicker(a.portScanInterval)
+	defer ticker.Stop()
+	_ = a.refreshPortScans(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_ = a.refreshPortScans(ctx)
+		}
+	}
+}
+
+func (a *app) startBaselineWatcher(ctx context.Context) {
+	if a.trafficMonitorURL == "" || a.baselineInterval <= 0 {
+		return
+	}
+	ticker := time.NewTicker(a.baselineInterval)
+	defer ticker.Stop()
+	_ = a.refreshBaseline(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_ = a.refreshBaseline(ctx)
+		}
+	}
+}
+
+func (a *app) refreshPortScans(ctx context.Context) error {
+	findings, err := a.fetchAllNetworkFindings(ctx)
+	if err != nil {
+		log.Printf("portscan refresh: %v", err)
+		return err
+	}
+	type set map[int]struct{}
+	portsBySrc := make(map[string]set)
+	for _, f := range findings {
+		src, _ := f["s"].(string)
+		if src == "" {
+			continue
+		}
+		rawPort, ok := f["dst_port"]
+		if !ok {
+			continue
+		}
+		var port int
+		switch v := rawPort.(type) {
+		case float64:
+			port = int(v)
+		case int:
+			port = v
+		case int64:
+			port = int(v)
+		case string:
+			if p, err := strconv.Atoi(v); err == nil {
+				port = p
+			}
+		}
+		if port <= 0 {
+			continue
+		}
+		if _, ok := portsBySrc[src]; !ok {
+			portsBySrc[src] = make(set)
+		}
+		portsBySrc[src][port] = struct{}{}
+	}
+	var results []PortScanFinding
+	for src, setPorts := range portsBySrc {
+		if len(setPorts) <= 5 {
+			continue
+		}
+		results = append(results, PortScanFinding{
+			Source:      src,
+			UniquePorts: len(setPorts),
+		})
+	}
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].UniquePorts == results[j].UniquePorts {
+			return results[i].Source < results[j].Source
+		}
+		return results[i].UniquePorts > results[j].UniquePorts
+	})
+	a.portScanMu.Lock()
+	a.portScans = results
+	a.portScanUpdated = time.Now()
+	a.portScanMu.Unlock()
+	return nil
+}
+
+func (a *app) refreshBaseline(ctx context.Context) error {
+	findings, err := a.fetchAllNetworkFindings(ctx)
+	if err != nil {
+		log.Printf("baseline refresh: %v", err)
+		return err
+	}
+	baselineCut := time.Now().Add(-a.baselineLearn)
+	minSpan := a.baselineMinSpan
+	minCount := a.baselineMinCount
+
+	tmp := make(map[BaselineKey]*BaselineEntry)
+
+	for _, f := range findings {
+		srcLabel, _ := f["s"].(string)
+		dstLabel, _ := f["t"].(string)
+		srcParsed := parseEndpointLabelGo(srcLabel)
+		dstParsed := parseEndpointLabelGo(dstLabel)
+		srcKind, srcName := kindNameFromString(fmt.Sprint(f["o_s"]))
+		dstKind, dstName := kindNameFromString(fmt.Sprint(f["o_t"]))
+		srcOwner := normalizeOwner(srcKind, srcName)
+		dstOwner := normalizeOwner(dstKind, dstName)
+
+		dstPort := intFromAny(f["dst_port"])
+		proto := intFromAny(f["proto"])
+
+		key := BaselineKey{
+			SrcNS:   srcParsed.Namespace,
+			SrcApp:  srcOwner,
+			DstNS:   dstParsed.Namespace,
+			DstApp:  dstOwner,
+			DstPort: dstPort,
+			Proto:   proto,
+		}
+		entry, ok := tmp[key]
+		if !ok {
+			entry = &BaselineEntry{
+				FirstSeen: time.Now(),
+				LastSeen:  time.Now(),
+				Count:     0,
+				PolicyHit: a.policyExists(ctx, srcParsed.Namespace) || a.policyExists(ctx, dstParsed.Namespace),
+			}
+			tmp[key] = entry
+		}
+		entry.Count++
+		entry.LastSeen = time.Now()
+		if entry.FirstSeen.After(time.Now()) {
+			entry.FirstSeen = time.Now()
+		}
+	}
+
+	// Merge into shared map with promotion rules
+	now := time.Now()
+	a.baselineMu.Lock()
+	if a.baselines == nil {
+		a.baselines = make(map[BaselineKey]*BaselineEntry)
+	}
+	for k, newEntry := range tmp {
+		existing, ok := a.baselines[k]
+		if !ok {
+			a.baselines[k] = newEntry
+			continue
+		}
+		if newEntry.FirstSeen.Before(existing.FirstSeen) {
+			existing.FirstSeen = newEntry.FirstSeen
+		}
+		if newEntry.LastSeen.After(existing.LastSeen) {
+			existing.LastSeen = newEntry.LastSeen
+		}
+		existing.Count += newEntry.Count
+		existing.PolicyHit = existing.PolicyHit || newEntry.PolicyHit
+	}
+	for k, v := range a.baselines {
+		span := v.LastSeen.Sub(v.FirstSeen)
+		if !v.Baseline && v.FirstSeen.Before(baselineCut) && v.Count >= minCount && span >= minSpan {
+			v.Baseline = true
+		}
+		// prune stale entries older than learn window * 2 without updates
+		if now.Sub(v.LastSeen) > a.baselineLearn*2 {
+			delete(a.baselines, k)
+		}
+	}
+	a.baselineUpdated = now
+	// make slice for logging or other uses
+	a.baselineMu.Unlock()
+	return nil
+}
+
+func (a *app) fetchAllNetworkFindings(ctx context.Context) ([]map[string]interface{}, error) {
+	if a.trafficMonitorURL == "" {
+		return nil, errors.New("traffic monitor URL not configured")
+	}
+	var all []map[string]interface{}
+	page := 1
+	perPage := 500
+	for page <= 50 { // sane upper bound
+		reqURL := a.trafficMonitorURL
+		sep := "?"
+		if strings.Contains(reqURL, "?") {
+			sep = "&"
+		}
+		reqURL = fmt.Sprintf("%s%shide_src_port=true&collapse=none&page=%d&per_page=%d", reqURL, sep, page, perPage)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, fmt.Errorf("traffic monitor status %d: %s", resp.StatusCode, string(body))
+		}
+		var wrapper struct {
+			Items []map[string]interface{} `json:"items"`
+			Total int                      `json:"total"`
+		}
+		var pageItems []map[string]interface{}
+		if err := json.Unmarshal(body, &wrapper); err == nil && len(wrapper.Items) > 0 {
+			pageItems = wrapper.Items
+		} else if err := json.Unmarshal(body, &pageItems); err != nil {
+			return nil, fmt.Errorf("failed to decode findings: %w", err)
+		}
+		if len(pageItems) == 0 {
+			break
+		}
+		all = append(all, pageItems...)
+		total := wrapper.Total
+		if total > 0 && len(all) >= total {
+			break
+		}
+		if len(pageItems) < perPage {
+			break
+		}
+		page++
+	}
+	return all, nil
+}
+
+type parsedEndpoint struct {
+	Namespace string
+	Pod       string
+	Node      string
+	Raw       string
+}
+
+func parseEndpointLabelGo(label string) parsedEndpoint {
+	parts := strings.Split(label, ":")
+	if len(parts) >= 3 && parts[0] == "pod" {
+		return parsedEndpoint{Namespace: parts[1], Pod: parts[2], Raw: label}
+	}
+	if len(parts) >= 3 && parts[0] == "node" {
+		return parsedEndpoint{Node: parts[2], Raw: label}
+	}
+	return parsedEndpoint{Raw: label}
+}
+
+func kindNameFromString(s string) (kind, name string) {
+	if strings.HasPrefix(s, "o:") {
+		s = strings.TrimPrefix(s, "o:")
+	}
+	parts := strings.SplitN(s, ":", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return "", s
+}
+
+func normalizeOwner(kind, name string) string {
+	if kind == "" && name == "" {
+		return ""
+	}
+	if kind == "rs" && name != "" {
+		// Best-effort derive deployment name by trimming trailing hash
+		base := name
+		if idx := strings.LastIndex(name, "-"); idx > 0 {
+			base = name[:idx]
+		}
+		return fmt.Sprintf("dep:%s", base)
+	}
+	if kind != "" {
+		return fmt.Sprintf("%s:%s", kind, name)
+	}
+	return name
+}
+
+func intFromAny(v interface{}) int {
+	switch t := v.(type) {
+	case float64:
+		return int(t)
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case json.Number:
+		i, _ := t.Int64()
+		return int(i)
+	case string:
+		i, _ := strconv.Atoi(t)
+		return i
+	default:
+		return 0
+	}
+}
+
+func (a *app) policyExists(ctx context.Context, ns string) bool {
+	if ns == "" || a.kube == nil {
+		return false
+	}
+	a.policyCacheMu.RLock()
+	val, ok := a.policyCache[ns]
+	a.policyCacheMu.RUnlock()
+	if ok {
+		return val
+	}
+	found := false
+	if npList, err := a.kube.NetworkingV1().NetworkPolicies(ns).List(ctx, metav1.ListOptions{Limit: 1}); err == nil && len(npList.Items) > 0 {
+		found = true
+	}
+	if !found {
+		if cnpList, err := a.kube.RESTClient().Get().AbsPath("/apis/cilium.io/v2/namespaces/"+ns+"/ciliumnetworkpolicies").Param("limit", "1").DoRaw(ctx); err == nil && len(cnpList) > 0 {
+			found = true
+		}
+	}
+	a.policyCacheMu.Lock()
+	a.policyCache[ns] = found
+	a.policyCacheMu.Unlock()
+	return found
 }
 
 func ifThen(cond bool, a, b string) string {

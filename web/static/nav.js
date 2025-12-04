@@ -9,6 +9,8 @@ function navMarkup(active) {
       <div class="nav-label">Platform</div>
       <a class="nav-link ${cls("dashboard")}" href="/dashboard.html">Dashboard</a>
       <a class="nav-link ${cls("scanners")}" href="/scanners.html">Scanners</a>
+      <a class="nav-link ${cls("network")}" href="/network.html">Network</a>
+      <a class="nav-link ${cls("portscans")}" href="/portscans.html">Port Scanning</a>
       <a class="nav-link ${cls("findings")}" href="/findings.html">Findings</a>
       <a class="nav-link ${cls("trusts")}" href="/trusts.html">Trusts</a>
       <a class="nav-link ${cls("docs")}" href="/docs.html">Docs</a>
