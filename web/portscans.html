@@ -7,6 +7,7 @@
   <title>NoClickOps Port Scanning</title>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/nav.js"></script>
+  <script src="/static/table-utils.js"></script>
 </head>
 
 <body>
@@ -31,8 +32,8 @@
           <table id="ps-table" style="width:100%; table-layout: fixed;">
             <thead>
               <tr>
-                <th style="cursor:pointer;" data-sort="source">Source ↕</th>
-                <th style="cursor:pointer;" data-sort="unique_ports">Unique Ports ↕</th>
+                <th data-sort="source" data-filter="source">Source</th>
+                <th data-sort="unique_ports">Unique Ports</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -49,12 +50,9 @@
 
     let token = localStorage.getItem("noclickops_token") || "";
     const err = document.getElementById("err");
-    const tbody = document.querySelector("#ps-table tbody");
     const meta = document.getElementById("meta");
     const logoutBtn = document.getElementById("logout-btn");
-    let sortKey = "unique_ports";
-    let sortDir = -1;
-    let rows = [];
+    let table;
 
     function api(path, opts = {}) {
       const headers = opts.headers || {};
@@ -85,67 +83,36 @@
       err.style.display = "none";
     }
 
-    function render() {
-      const sorted = [...rows].sort((a, b) => {
-        let av = a[sortKey];
-        let bv = b[sortKey];
-        let cmp = 0;
-        if (typeof av === "number" && typeof bv === "number") {
-          cmp = av === bv ? 0 : (av < bv ? -1 : 1);
-        } else {
-          av = (av || "").toString().toLowerCase();
-          bv = (bv || "").toString().toLowerCase();
-          cmp = av === bv ? 0 : (av < bv ? -1 : 1);
-        }
-        return cmp * sortDir;
-      });
-      if (!sorted.length) {
-        tbody.innerHTML = `<tr><td colspan="2" class="text-center text-muted" style="padding:32px;">No suspicious port-scanning sources observed yet.</td></tr>`;
-        return;
-      }
-      tbody.innerHTML = sorted.map(r => `
-        <tr>
-          <td>${r.source}</td>
-          <td>${r.unique_ports}</td>
-        </tr>
-      `).join("");
-    }
-
-    function setupSort() {
-      document.querySelectorAll("#ps-table th").forEach(th => {
-        th.addEventListener("click", () => {
-          const key = th.getAttribute("data-sort");
-          if (!key) return;
-          if (sortKey === key) {
-            sortDir = -sortDir;
-          } else {
-            sortKey = key;
-            sortDir = key === "unique_ports" ? -1 : 1;
-          }
-          render();
-        });
-      });
-    }
-
     async function loadPortScans() {
       if (!token) return redirectToLogin();
       try {
         clearError();
         const data = await api("/v1/network/portscans");
-        rows = data.items || [];
+        const rows = (data.items || []).map(r => ({
+          source: r.source,
+          unique_ports: r.unique_ports,
+        }));
+        
+        table.setData(rows);
+        
         if (data.updated_at) {
           meta.textContent = `Sources scanning multiple ports (>5). Last updated ${new Date(data.updated_at).toLocaleString()}.`;
         } else {
           meta.textContent = "Sources scanning multiple ports (>5).";
         }
-        render();
       } catch (e) {
         showError(e);
       }
     }
 
     logoutBtn.addEventListener("click", redirectToLogin);
-    setupSort();
+    
+    // Initialize StandardTable
+    table = new StandardTable('ps-table', {
+      defaultSort: 'unique_ports',
+      defaultDir: -1
+    });
+    
     loadPortScans();
     setInterval(loadPortScans, 15000);
   </script>

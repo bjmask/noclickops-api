@@ -56,222 +56,225 @@
         <div class="error" id="err" style="display:none;margin-bottom:24px;"></div>
 
         <div style="display:grid;grid-template-columns:2fr 1fr;gap:24px;">
-        <div>
-          <div class="card">
-            <h3 style="margin-bottom:20px;">General Configuration</h3>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-              <div class="input-group">
-                <label class="input-label">Scanner Name</label>
-                <input id="sc-name" placeholder="my-scanner" />
-              </div>
-              <div class="input-group">
-                <label class="input-label">Cloud Provider</label>
-                <select id="cloud-provider">
-                  <option value="aws">AWS</option>
-                  <option value="gcp">GCP</option>
-                  <option value="azure">Azure</option>
-                </select>
-              </div>
-              <div class="input-group">
-                <label class="input-label">Scanner Type</label>
-                <select id="scanner-type">
-                  <option value="iam">IAM (CloudTrail/Kinesis)</option>
-                  <option value="kube-audit">Kube Audit</option>
-                </select>
-              </div>
-              <div class="input-group">
-                <label class="input-label">Region</label>
-                <input id="region" placeholder="us-west-2" />
-              </div>
-              <div class="input-group">
-                <label class="input-label">Labels (key=value)</label>
-                <textarea id="labels" rows="3" placeholder="env=prod&#10;team=platform"></textarea>
-              </div>
-            </div>
-  
-            <div class="iam-only" style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-              <div class="input-group">
-                <label class="input-label">Source</label>
-                <select id="source">
-                  <option value="cloudtrail">cloudtrail</option>
-                  <option value="kinesis">kinesis</option>
-                </select>
-              </div>
-              <div class="input-group">
-                <label class="input-label">Kinesis Stream (if kinesis)</label>
-                <input id="kinesis-stream" placeholder="stream-name" />
-              </div>
-              <div class="input-group iam-only">
-                <label class="input-label">AWS Account ID (optional)</label>
-                <input id="aws-account" placeholder="123456789012" />
-              </div>
-            </div>
-
-            <div class="gcp-only" style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:16px;display:none;">
-              <div class="input-group">
-                <label class="input-label">Source</label>
-                <select id="gcp-source">
-                  <option value="gcp-cloud-logging">gcp-cloud-logging</option>
-                  <option value="gcp-pubsub">gcp-pubsub</option>
-                </select>
-              </div>
-              <div class="input-group">
-                <label class="input-label">Project ID</label>
-                <input id="gcp-project" placeholder="my-gcp-project" />
-              </div>
-              <div class="gcp-pubsub-only input-group">
-                <label class="input-label">Pub/Sub Subscription</label>
-                <input id="gcp-subscription" placeholder="audit" />
-              </div>
-              <div class="gcp-pubsub-only input-group">
-                <label class="input-label">Pub/Sub Max Messages</label>
-                <input id="gcp-max-messages" type="number" min="1" max="1000" placeholder="1000" />
-              </div>
-              <div class="gcp-pubsub-only input-group">
-                <label class="input-label">Pub/Sub Poll (ms)</label>
-                <input id="gcp-poll-ms" type="number" min="0" step="50" placeholder="0" />
-              </div>
-              <div class="gcp-pubsub-only input-group">
-                <label class="input-label">Pub/Sub Workers</label>
-                <input id="gcp-workers" type="number" min="1" placeholder="1" />
-              </div>
-            </div>
-
-            <div class="kube-only" style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-              <div class="input-group">
-                <label class="input-label">Audit Log Group</label>
-                <input id="kube-log-group" placeholder="/aws/eks/cluster/audit" />
-              </div>
-              <div class="input-group">
-                <label class="input-label">Audit Stream Prefix</label>
-                <input id="kube-log-prefix" placeholder="kube-apiserver-audit" />
-              </div>
-            </div>
-          </div>
-
-          <div class="card">
-            <h3 style="margin-bottom:20px;">Detection Rules</h3>
-
-            <div class="iam-detection">
-              <div class="input-group">
-                <label class="input-label">Console user agents (newline separated)</label>
-                <textarea id="console-uas" rows="4"></textarea>
-              </div>
+          <div>
+            <div class="card">
+              <h3 style="margin-bottom:20px;">General Configuration</h3>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
                 <div class="input-group">
-                  <label class="input-label">Terraform user agents</label>
-                  <textarea id="tf-uas" rows="4"></textarea>
+                  <label class="input-label">Scanner Name</label>
+                  <input id="sc-name" placeholder="my-scanner" autocomplete="off" />
                 </div>
                 <div class="input-group">
-                  <label class="input-label">Terraform role hints</label>
-                  <textarea id="tf-roles" rows="4"></textarea>
+                  <label class="input-label">Cloud Provider</label>
+                  <select id="cloud-provider">
+                    <option value="aws">AWS</option>
+                    <option value="gcp">GCP</option>
+                    <option value="azure">Azure</option>
+                  </select>
+                </div>
+                <div class="input-group">
+                  <label class="input-label">Scanner Type</label>
+                  <select id="scanner-type">
+                    <option value="iam">IAM (CloudTrail/Kinesis)</option>
+                    <option value="kube-audit">Kube Audit</option>
+                  </select>
+                </div>
+                <div class="input-group">
+                  <label class="input-label">Region</label>
+                  <input id="region" placeholder="us-west-2" autocomplete="off" />
+                </div>
+                <div class="input-group">
+                  <label class="input-label">Labels (key=value)</label>
+                  <textarea id="labels" rows="3" placeholder="env=prod&#10;team=platform"></textarea>
+                </div>
+              </div>
+
+              <div class="iam-only" style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                <div class="input-group">
+                  <label class="input-label">Source</label>
+                  <select id="source">
+                    <option value="cloudtrail">cloudtrail</option>
+                    <option value="kinesis">kinesis</option>
+                  </select>
+                </div>
+                <div class="input-group">
+                  <label class="input-label">Kinesis Stream (if kinesis)</label>
+                  <input id="kinesis-stream" placeholder="stream-name" autocomplete="off" />
+                </div>
+                <div class="input-group iam-only">
+                  <label class="input-label">AWS Account ID (optional)</label>
+                  <input id="aws-account" placeholder="123456789012" autocomplete="off" />
+                </div>
+              </div>
+
+              <div class="gcp-only"
+                style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:16px;display:none;">
+                <div class="input-group">
+                  <label class="input-label">Source</label>
+                  <select id="gcp-source">
+                    <option value="gcp-cloud-logging">gcp-cloud-logging</option>
+                    <option value="gcp-pubsub">gcp-pubsub</option>
+                  </select>
+                </div>
+                <div class="input-group">
+                  <label class="input-label">Project ID</label>
+                  <input id="gcp-project" placeholder="my-gcp-project" autocomplete="off" />
+                </div>
+                <div class="gcp-pubsub-only input-group">
+                  <label class="input-label">Pub/Sub Subscription</label>
+                  <input id="gcp-subscription" placeholder="audit" autocomplete="off" />
+                </div>
+                <div class="gcp-pubsub-only input-group">
+                  <label class="input-label">Pub/Sub Max Messages</label>
+                  <input id="gcp-max-messages" type="number" min="1" max="1000" placeholder="1000" / autocomplete="off">
+                </div>
+                <div class="gcp-pubsub-only input-group">
+                  <label class="input-label">Pub/Sub Poll (ms)</label>
+                  <input id="gcp-poll-ms" type="number" min="0" step="50" placeholder="0" / autocomplete="off">
+                </div>
+                <div class="gcp-pubsub-only input-group">
+                  <label class="input-label">Pub/Sub Workers</label>
+                  <input id="gcp-workers" type="number" min="1" placeholder="1" / autocomplete="off">
+                </div>
+              </div>
+
+              <div class="kube-only" style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                <div class="input-group">
+                  <label class="input-label">Audit Log Group</label>
+                  <input id="kube-log-group" placeholder="/aws/eks/cluster/audit" autocomplete="off" />
+                </div>
+                <div class="input-group">
+                  <label class="input-label">Audit Stream Prefix</label>
+                  <input id="kube-log-prefix" placeholder="kube-apiserver-audit" autocomplete="off" />
                 </div>
               </div>
             </div>
 
-            <div class="kube-only">
-              <div class="input-group">
-                <label class="input-label">Kube verbs</label>
-                <textarea id="kube-verbs" rows="4" placeholder="create\nupdate..."></textarea>
-              </div>
-              <div class="input-group">
-                <label class="input-label">Kube ignore users (glob)</label>
-                <textarea id="kube-ignore-users" rows="4" placeholder="system:node:*"></textarea>
-              </div>
-            </div>
+            <div class="card">
+              <h3 style="margin-bottom:20px;">Detection Rules</h3>
 
-            <h4 style="margin-top:24px;margin-bottom:16px;color:var(--text-muted);">Filters</h4>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-              <div class="input-group iam-only">
-                <label class="input-label">Ignore actors</label>
-                <textarea id="ignore-actors" rows="4"></textarea>
+              <div class="iam-detection">
+                <div class="input-group">
+                  <label class="input-label">Console user agents (newline separated)</label>
+                  <textarea id="console-uas" rows="4"></textarea>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                  <div class="input-group">
+                    <label class="input-label">Terraform user agents</label>
+                    <textarea id="tf-uas" rows="4"></textarea>
+                  </div>
+                  <div class="input-group">
+                    <label class="input-label">Terraform role hints</label>
+                    <textarea id="tf-roles" rows="4"></textarea>
+                  </div>
+                </div>
               </div>
-              <div class="input-group">
-                <label class="input-label">Ignore user agents</label>
-                <textarea id="ignore-uas" rows="4"></textarea>
+
+              <div class="kube-only">
+                <div class="input-group">
+                  <label class="input-label">Kube verbs</label>
+                  <textarea id="kube-verbs" rows="4" placeholder="create\nupdate..."></textarea>
+                </div>
+                <div class="input-group">
+                  <label class="input-label">Kube ignore users (glob)</label>
+                  <textarea id="kube-ignore-users" rows="4" placeholder="system:node:*"></textarea>
+                </div>
               </div>
-              <div class="input-group">
-                <label class="input-label">Allowed events</label>
-                <textarea id="whitelist-events" rows="4"></textarea>
-              </div>
-              <div class="input-group">
-                <label class="input-label">Disallowed events</label>
-                <textarea id="blacklist-events" rows="4"></textarea>
+
+              <h4 style="margin-top:24px;margin-bottom:16px;color:var(--text-muted);">Filters</h4>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                <div class="input-group iam-only">
+                  <label class="input-label">Ignore actors</label>
+                  <textarea id="ignore-actors" rows="4"></textarea>
+                </div>
+                <div class="input-group">
+                  <label class="input-label">Ignore user agents</label>
+                  <textarea id="ignore-uas" rows="4"></textarea>
+                </div>
+                <div class="input-group">
+                  <label class="input-label">Allowed events</label>
+                  <textarea id="whitelist-events" rows="4"></textarea>
+                </div>
+                <div class="input-group">
+                  <label class="input-label">Disallowed events</label>
+                  <textarea id="blacklist-events" rows="4"></textarea>
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <div>
-          <div class="card">
-            <h3 style="margin-bottom:20px;">Settings</h3>
-            <div class="input-group">
-              <label class="input-label">Lookback minutes</label>
-              <input id="lookback-minutes" type="number" min="0" placeholder="e.g. 15" />
-            </div>
-            <div class="input-group">
-              <label class="input-label">Lookback hours</label>
-              <input id="lookback-hours" type="number" min="0" placeholder="e.g. 1" />
-            </div>
-            <div class="input-group">
-              <label class="input-label">Poll interval (ms)</label>
-              <input id="poll-ms" type="number" min="50" step="50" placeholder="1000" />
-            </div>
-          </div>
-
-          <div class="card">
-            <h3 style="margin-bottom:20px;">Jira Integration</h3>
-            <div class="input-group">
-              <label class="input-label">Base URL</label>
-              <input id="jira-url" placeholder="https://example.atlassian.net" />
-            </div>
-            <div class="input-group">
-              <label class="input-label">Project Key</label>
-              <input id="jira-project" placeholder="OPS" />
-            </div>
-            <div class="input-group">
-              <label class="input-label">Issue Type</label>
-              <input id="jira-issue" placeholder="Task" />
-            </div>
-            <div class="input-group">
-              <label class="input-label">JIRA_EMAIL</label>
-              <input id="jira-email" placeholder="user@example.com" />
-            </div>
-            <div class="input-group">
-              <label class="input-label">JIRA_TOKEN</label>
-              <input id="jira-token" autocomplete="off" type="password" placeholder="leave blank to omit" />
-            </div>
-          </div>
-
-          <div class="card">
-            <h3 style="margin-bottom:20px;">Credentials</h3>
-            <!-- Anti-autofill trap -->
-            <div style="height:0;overflow:hidden;">
-              <input type="text" name="fake_user_trap" tabindex="-1" />
-              <input type="password" name="fake_pass_trap" tabindex="-1" />
-            </div>
-
-            <form autocomplete="off" onsubmit="return false;">
-              <div class="input-group aws-creds">
-                <label class="input-label">AWS_ACCESS_KEY_ID</label>
-                <input id="aws-ak" name="noclickops_ak_field" placeholder="optional" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" style="background-color:inherit;" />
+          <div>
+            <div class="card">
+              <h3 style="margin-bottom:20px;">Settings</h3>
+              <div class="input-group">
+                <label class="input-label">Lookback minutes</label>
+                <input id="lookback-minutes" type="number" min="0" placeholder="e.g. 15" / autocomplete="off">
               </div>
-              <div class="input-group aws-creds">
-                <label class="input-label">AWS_SECRET_ACCESS_KEY</label>
-                <input id="aws-ak" name="noclickops_ak_field" placeholder="optional" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" style="background-color:inherit;" />
+              <div class="input-group">
+                <label class="input-label">Lookback hours</label>
+                <input id="lookback-hours" type="number" min="0" placeholder="e.g. 1" / autocomplete="off">
               </div>
-              <!-- <div class="input-group aws-creds">
+              <div class="input-group">
+                <label class="input-label">Poll interval (ms)</label>
+                <input id="poll-ms" type="number" min="50" step="50" placeholder="1000" / autocomplete="off">
+              </div>
+            </div>
+
+            <div class="card">
+              <h3 style="margin-bottom:20px;">Jira Integration</h3>
+              <div class="input-group">
+                <label class="input-label">Base URL</label>
+                <input id="jira-url" placeholder="https://example.atlassian.net" autocomplete="off" />
+              </div>
+              <div class="input-group">
+                <label class="input-label">Project Key</label>
+                <input id="jira-project" placeholder="OPS" autocomplete="off" />
+              </div>
+              <div class="input-group">
+                <label class="input-label">Issue Type</label>
+                <input id="jira-issue" placeholder="Task" autocomplete="off" />
+              </div>
+              <div class="input-group">
+                <label class="input-label">JIRA_EMAIL</label>
+                <input id="jira-email" placeholder="user@example.com" autocomplete="off" />
+              </div>
+              <div class="input-group">
+                <label class="input-label">JIRA_TOKEN</label>
+                <input id="jira-token" autocomplete="off" type="password" placeholder="leave blank to omit" />
+              </div>
+            </div>
+
+            <div class="card">
+              <h3 style="margin-bottom:20px;">Credentials</h3>
+              <!-- Anti-autofill trap -->
+              <div style="height:0;overflow:hidden;">
+                <input type="text" name="fake_user_trap" tabindex="-1" />
+                <input type="password" name="fake_pass_trap" tabindex="-1" />
+              </div>
+
+              <form autocomplete="off" onsubmit="return false;">
+                <div class="input-group aws-creds">
+                  <label class="input-label">AWS_ACCESS_KEY_ID</label>
+                  <input id="aws-ak" name="noclickops_ak_field" placeholder="optional" autocomplete="off" readonly
+                    onfocus="this.removeAttribute('readonly')" style="background-color:inherit;" />
+                </div>
+                <div class="input-group aws-creds">
+                  <label class="input-label">AWS_SECRET_ACCESS_KEY</label>
+                  <input id="aws-ak" name="noclickops_ak_field" placeholder="optional" autocomplete="off" readonly
+                    onfocus="this.removeAttribute('readonly')" style="background-color:inherit;" />
+                </div>
+                <!-- <div class="input-group aws-creds">
                 <label class="input-label">AWS_SESSION_TOKEN</label>
                 <textarea id="aws-st" name="noclickops_st_field" placeholder="optional" class="masked-input" rows="1" style="resize:none; overflow:hidden; white-space:nowrap; padding-top:10px;"></textarea>
               </div> -->
-              <div class="input-group gcp-creds" style="display:none;">
-                <label class="input-label">GCP_CREDENTIALS_JSON</label>
-                <textarea id="gcp-creds-json" rows="6" placeholder='{ "type": "service_account", ... }'></textarea>
-              </div>
-            </form>
+                <div class="input-group gcp-creds" style="display:none;">
+                  <label class="input-label">GCP_CREDENTIALS_JSON</label>
+                  <textarea id="gcp-creds-json" rows="6" placeholder='{ "type": "service_account", ... }'></textarea>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
-      </div>
 
         <div class="card" style="margin-top:24px;">
           <h3>Preview Output</h3>
@@ -290,7 +293,7 @@
     const token = localStorage.getItem("noclickops_token") || "";
     const listEl = document.getElementById("scanners-list");
     const formEl = document.getElementById("create-form");
-    
+
     applyDefaults();
     loadScanners();
 
@@ -318,14 +321,13 @@
           return;
         }
 
-        // fetch health per scanner
-        const scanners = await Promise.all(list.map(async s => {
-          try {
-            const h = await api(`/v1/scanners/${encodeURIComponent(s.name)}/health`);
-            return { ...s, status: h.status || "unknown" };
-          } catch (_) {
-            return { ...s, status: "unknown" };
-          }
+        // Fetch all scanner health in one call
+        const healthData = await api("/v1/scanners/health");
+        const healthMap = new Map(healthData.scanners.map(h => [h.name, h.status]));
+
+        const scanners = list.map(s => ({
+          ...s,
+          status: healthMap.get(s.name) || "unknown"
         }));
 
         listEl.innerHTML = scanners.map(s => {

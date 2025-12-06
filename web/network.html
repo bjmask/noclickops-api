@@ -18,6 +18,7 @@
     .filter-option { display:flex; align-items:center; justify-content:space-between; padding:6px 10px; border-radius:4px; cursor:pointer; }
     .filter-option:hover { background:rgba(255,255,255,0.05); }
     .filter-option.selected { background:rgba(255,255,255,0.08); }
+    .filter-option.highlighted { background:rgba(100,149,237,0.3) !important; }
     .filter-option span { white-space:normal; }
     .filter-check { width:16px; text-align:right; visibility:hidden; }
     .filter-option.selected .filter-check { visibility:visible; }
@@ -73,7 +74,7 @@
         <div class="filter-group">
           <span class="filter-label">Columns</span>
           <div class="filter-trigger" id="col-trigger">
-            <input id="col-input" placeholder="Select columns" readonly />
+            <input id="col-input" placeholder="Select columns" readonly autocomplete="off" />
             <span class="caret">⌄</span>
           </div>
           <div id="col-dropdown" class="filter-dropdown" onclick="event.stopPropagation();">
@@ -483,6 +484,16 @@
         qs.set("hide_src_port", "true");
         qs.set("collapse", collapseMode);
         const data = await api(`/v1/network/keys?${qs.toString()}`);
+        // If the backend returns port keys but the schema was missing the feature flag,
+        // enable the column/filter so users can actually see and filter by port.
+        if (!featureFlags.dst_port && data && Array.isArray(data.dst_port) && data.dst_port.length) {
+          featureFlags.dst_port = true;
+          if (!columnOptions.some(o => o.key === "dst_port")) {
+            columnOptions.push({ key: "dst_port", label: "Destination Port" });
+          }
+          renderColumnOptions();
+          applyColumnVisibility();
+        }
         FILTER_FIELDS.forEach(f => {
           if (data && Array.isArray(data[f.key])) {
             filterState[f.key].options = data[f.key];
@@ -614,6 +625,80 @@
     function closeAllFilterDropdowns() {
       document.querySelectorAll(".filter-dropdown").forEach(dd => dd.style.display = "none");
     }
+    
+    function handleSearchKeydown(e, filterKey) {
+      const optionsContainer = document.getElementById(`filter-options-${filterKey}`);
+      if (!optionsContainer) return;
+      
+      const visibleOptions = Array.from(optionsContainer.querySelectorAll('.filter-option'))
+        .filter(opt => opt.style.display !== 'none');
+      
+      if (visibleOptions.length === 0) return;
+      
+      // Handle Cmd+Space or Ctrl+Space to apply selected filters
+      if ((e.metaKey || e.ctrlKey) && e.code === 'Space') {
+        e.preventDefault();
+        closeAllFilterDropdowns();
+        loadNetwork();
+        return;
+      }
+      
+      let currentIndex = parseInt(optionsContainer.dataset.highlightedIndex || '-1');
+      
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          currentIndex = (currentIndex + 1) % visibleOptions.length;
+          highlightOption(visibleOptions, currentIndex, optionsContainer);
+          break;
+          
+        case 'ArrowUp':
+          e.preventDefault();
+          currentIndex = currentIndex <= 0 ? visibleOptions.length - 1 : currentIndex - 1;
+          highlightOption(visibleOptions, currentIndex, optionsContainer);
+          break;
+          
+        case 'Enter':
+          e.preventDefault();
+          if (currentIndex >= 0 && currentIndex < visibleOptions.length) {
+            visibleOptions[currentIndex].click();
+          }
+          break;
+          
+        case 'Escape':
+          e.preventDefault();
+          closeAllFilterDropdowns();
+          break;
+      }
+    }
+    
+    function highlightOption(visibleOptions, index, container) {
+      // Remove previous highlight
+      removeHighlight(container);
+      
+      if (index >= 0 && index < visibleOptions.length) {
+        const option = visibleOptions[index];
+        option.classList.add('highlighted');
+        option.style.background = 'rgba(100,149,237,0.3)'; // Cornflower blue highlight
+        
+        // Scroll into view if needed
+        option.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        
+        container.dataset.highlightedIndex = index;
+      }
+    }
+    
+    function removeHighlight(container) {
+      const filterKey = container.id.replace('filter-options-', '');
+      container.querySelectorAll('.filter-option.highlighted').forEach(opt => {
+        opt.classList.remove('highlighted');
+        const optionText = opt.textContent.replace('✓', '').trim();
+        const state = filterState[filterKey];
+        if (state) {
+          opt.style.background = state.selected.has(optionText) ? 'rgba(255,255,255,0.08)' : '';
+        }
+      });
+    }
 
     function updateFilterInputText(kind) {
       const input = document.getElementById(`filter-input-${kind}`);
@@ -648,13 +733,45 @@
     }
 
     function filterFilterOptions(kind) {
-      const term = (document.getElementById(`filter-search-${kind}`)?.value || "").toLowerCase();
+      const searchInput = document.getElementById(`filter-search-${kind}`);
       const opts = document.getElementById(`filter-options-${kind}`);
-      if (!opts) return;
-      opts.querySelectorAll(".filter-option").forEach(opt => {
-        const txt = opt.textContent.toLowerCase();
-        opt.style.display = txt.includes(term) ? "flex" : "none";
+      if (!searchInput || !opts) return;
+      
+      const term = searchInput.value;
+      let regex = null;
+      let useRegex = false;
+      
+      // Try to parse as regex
+      if (term.length > 0) {
+        try {
+          regex = new RegExp(term, 'i');
+          useRegex = true;
+        } catch (e) {
+          // If regex parsing fails, fall back to simple string matching
+          useRegex = false;
+        }
+      }
+      
+      const options = opts.querySelectorAll(".filter-option");
+      options.forEach((opt, index) => {
+        const txt = opt.textContent.replace('✓', '').trim();
+        let matches = false;
+        
+        if (!term) {
+          matches = true;
+        } else if (useRegex && regex) {
+          matches = regex.test(txt);
+        } else {
+          matches = txt.toLowerCase().includes(term.toLowerCase());
+        }
+        
+        opt.style.display = matches ? "flex" : "none";
+        opt.dataset.optionIndex = index;
       });
+      
+      // Reset highlighted index when filter changes
+      delete opts.dataset.highlightedIndex;
+      removeHighlight(opts);
     }
 
     function toggleFilterDropdown(kind) {
@@ -691,10 +808,18 @@
           dd.className = "filter-dropdown";
           dd.onclick = (ev) => ev.stopPropagation();
           dd.innerHTML = `
-            <input id="filter-search-${f.key}" class="filter-search" placeholder="Search..." oninput="filterFilterOptions('${f.key}')" />
+            <input id="filter-search-${f.key}" class="filter-search" placeholder="Search (supports regex)..." oninput="filterFilterOptions('${f.key}')" autocomplete="off" />
             <div id="filter-options-${f.key}" class="filter-options"></div>
           `;
           th.appendChild(dd);
+          
+          // Add keyboard handler after the element is added to DOM
+          setTimeout(() => {
+            const searchInput = document.getElementById(`filter-search-${f.key}`);
+            if (searchInput) {
+              searchInput.addEventListener('keydown', (e) => handleSearchKeydown(e, f.key));
+            }
+          }, 0);
         }
       });
     }

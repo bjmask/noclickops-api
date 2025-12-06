@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Network Trusts</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/nav.js"></script>
+</head>
+<body>
+  <div class="layout-dashboard">
+    <aside>
+      <div id="nav-container"></div>
+      <div style="margin-top:auto;">
+        <button id="logout-btn" class="btn btn-secondary" style="width:100%;">Logout</button>
+      </div>
+    </aside>
+    <main>
+      <div class="page-header">
+        <div>
+          <h1 class="page-title">Network Trusts</h1>
+          <p class="page-desc">Edges allowed by NetworkPolicies (ingress/egress) including ports.</p>
+        </div>
+        <button class="btn btn-secondary" id="refresh-btn">Refresh</button>
+      </div>
+      <div class="card" style="padding:0;overflow:hidden;">
+        <div class="table-container" style="border:none;border-radius:0;">
+          <table id="trust-table" style="width:100%;table-layout:auto;">
+            <thead>
+              <tr>
+                <th data-sort="src" data-filter="src"><div class="th-wrap"><span>Source</span><div class="th-actions"><span class="sort-icon">↕</span><span class="filter-icon">⌃</span></div></div></th>
+                <th data-sort="dst" data-filter="dst"><div class="th-wrap"><span>Destination</span><div class="th-actions"><span class="sort-icon">↕</span><span class="filter-icon">⌃</span></div></div></th>
+                <th data-sort="proto" data-filter="proto"><div class="th-wrap"><span>Proto</span><div class="th-actions"><span class="sort-icon">↕</span><span class="filter-icon">⌃</span></div></div></th>
+                <th data-sort="dst_port" data-filter="dst_port"><div class="th-wrap"><span>Port</span><div class="th-actions"><span class="sort-icon">↕</span><span class="filter-icon">⌃</span></div></div></th>
+                <th data-sort="policy" data-filter="policy"><div class="th-wrap"><span>Policy</span><div class="th-actions"><span class="sort-icon">↕</span><span class="filter-icon">⌃</span></div></div></th>
+                <th data-sort="status" data-filter="status"><div class="th-wrap"><span>Status</span><div class="th-actions"><span class="sort-icon">↕</span><span class="filter-icon">⌃</span></div></div></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="err" class="error" style="display:none;color:var(--accent-danger);margin-top:16px;"></div>
+    </main>
+  </div>
+  <script>
+    mountNav("network-trusts");
+    const tbody = document.querySelector("#trust-table tbody");
+    const err = document.getElementById("err");
+    const refreshBtn = document.getElementById("refresh-btn");
+    const token = localStorage.getItem("noclickops_token") || "";
+    const FILTER_FIELDS = [
+      { key: "src", label: "Source" },
+      { key: "dst", label: "Destination" },
+      { key: "proto", label: "Proto" },
+      { key: "dst_port", label: "Port" },
+      { key: "policy", label: "Policy" },
+      { key: "status", label: "Status" },
+    ];
+    const filterState = {};
+    FILTER_FIELDS.forEach(f => {
+      filterState[f.key] = { options: [], selected: new Set() };
+    });
+    let trustRows = [];
+    let sortKey = null;
+    let sortDir = 1;
+
+    function redirectToLogin() {
+      localStorage.removeItem("noclickops_token");
+      window.location.href = "/";
+    }
+
+    async function api(path, opts = {}) {
+      const headers = opts.headers || {};
+      headers["Content-Type"] = "application/json";
+      if (token) headers["Authorization"] = "Bearer " + token;
+      const res = await fetch(path, { ...opts, headers });
+      let data = {};
+      try { data = await res.json(); } catch (_) {}
+      if (res.status === 401) { redirectToLogin(); throw "unauthorized"; }
+      if (!res.ok) throw data.error || res.statusText;
+      return data;
+    }
+
+    function showError(msg) {
+      err.textContent = msg;
+      err.style.display = "block";
+    }
+
+    function clearError() { err.style.display = "none"; }
+
+    function formatFieldValue(row, key) {
+      if (key === "policy") {
+        return (row.policy || "").trim();
+      }
+      if (key === "proto" || key === "dst_port") {
+        const value = row[key];
+        return value ? String(value) : "";
+      }
+      if (key === "status") {
+        return row.trusted ? "Trusted" : "Not Trusted";
+      }
+      return row[key] || "";
+    }
+
+    function filteredRows() {
+      return trustRows.filter(row => {
+        return FILTER_FIELDS.every(field => {
+          const selected = filterState[field.key].selected;
+          if (!selected.size) return true;
+          const val = formatFieldValue(row, field.key);
+          return selected.has(val);
+        });
+      });
+    }
+
+    function sortedRows(rows) {
+      if (!sortKey) return rows;
+      return [...rows].sort((a, b) => {
+        let av, bv;
+        if (sortKey === "status") {
+          av = a.trusted ? "Trusted" : "Not Trusted";
+          bv = b.trusted ? "Trusted" : "Not Trusted";
+        } else {
+          av = a[sortKey];
+          bv = b[sortKey];
+        }
+        if (typeof av === "number" && typeof bv === "number") {
+          return (av - bv) * sortDir;
+        }
+        const as = (av || "").toString().toLowerCase();
+        const bs = (bv || "").toString().toLowerCase();
+        if (as === bs) {
+          return 0;
+        }
+        return (as < bs ? -1 : 1) * sortDir;
+      });
+    }
+
+    function render(rows) {
+      tbody.innerHTML = "";
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="6" style="padding:18px;text-align:center;color:var(--text-muted);">No flows found</td></tr>';
+        return;
+      }
+      rows.forEach(r => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td style="padding:10px;">${r.src}</td>
+          <td style="padding:10px;">${r.dst}</td>
+          <td style="padding:10px;">${r.proto || ""}</td>
+          <td style="padding:10px;">${r.dst_port || ""}</td>
+          <td style="padding:10px;">${r.policy || "-"}</td>
+          <td style="padding:10px;"><span class="trust-dot ${r.trusted ? "trust-ok" : "trust-miss"}" title="${r.trusted ? "Trusted by policy" : "No matching policy"}"></span></td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function refresh() {
+      const rows = sortedRows(filteredRows());
+      render(rows);
+    }
+
+    function toggleFilterDropdown(kind) {
+      const dd = document.getElementById(`filter-dd-${kind}`);
+      if (!dd) return;
+      const show = dd.style.display !== "block";
+      closeAllFilterDropdowns();
+      dd.style.display = show ? "block" : "none";
+      if (show) {
+        const search = document.getElementById(`filter-search-${kind}`);
+        if (search) {
+          search.value = "";
+          filterFilterOptions(kind);
+          search.focus();
+        }
+      }
+    }
+
+    function closeAllFilterDropdowns() {
+      document.querySelectorAll(".filter-dropdown").forEach(dd => (dd.style.display = "none"));
+    }
+
+    function filterFilterOptions(kind) {
+      const searchInput = document.getElementById(`filter-search-${kind}`);
+      const opts = document.getElementById(`filter-options-${kind}`);
+      if (!searchInput || !opts) return;
+      
+      const term = searchInput.value;
+      let regex = null;
+      let useRegex = false;
+      
+      // Try to parse as regex
+      if (term.length > 0) {
+        try {
+          regex = new RegExp(term, 'i');
+          useRegex = true;
+        } catch (e) {
+          // If regex parsing fails, fall back to simple string matching
+          useRegex = false;
+        }
+      }
+      
+      const options = opts.querySelectorAll(".filter-option");
+      options.forEach((opt, index) => {
+        const txt = opt.textContent.replace('✓', '').trim();
+        let matches = false;
+        
+        if (!term) {
+          matches = true;
+        } else if (useRegex && regex) {
+          matches = regex.test(txt);
+        } else {
+          matches = txt.toLowerCase().includes(term.toLowerCase());
+        }
+        
+        opt.style.display = matches ? "flex" : "none";
+        opt.dataset.optionIndex = index;
+      });
+      
+      // Reset highlighted index when filter changes
+      delete opts.dataset.highlightedIndex;
+      removeHighlight(opts);
+    }
+    
+    function handleSearchKeydown(e, filterKey) {
+      const optionsContainer = document.getElementById(`filter-options-${filterKey}`);
+      if (!optionsContainer) return;
+      
+      const visibleOptions = Array.from(optionsContainer.querySelectorAll('.filter-option'))
+        .filter(opt => opt.style.display !== 'none');
+      
+      if (visibleOptions.length === 0) return;
+      
+      // Handle Cmd+Space or Ctrl+Space to apply selected filters
+      if ((e.metaKey || e.ctrlKey) && e.code === 'Space') {
+        e.preventDefault();
+        closeAllFilterDropdowns();
+        refresh();
+        return;
+      }
+      
+      let currentIndex = parseInt(optionsContainer.dataset.highlightedIndex || '-1');
+      
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          currentIndex = (currentIndex + 1) % visibleOptions.length;
+          highlightOption(visibleOptions, currentIndex, optionsContainer);
+          break;
+          
+        case 'ArrowUp':
+          e.preventDefault();
+          currentIndex = currentIndex <= 0 ? visibleOptions.length - 1 : currentIndex - 1;
+          highlightOption(visibleOptions, currentIndex, optionsContainer);
+          break;
+          
+        case 'Enter':
+          e.preventDefault();
+          if (currentIndex >= 0 && currentIndex < visibleOptions.length) {
+            visibleOptions[currentIndex].click();
+          }
+          break;
+          
+        case 'Escape':
+          e.preventDefault();
+          closeAllFilterDropdowns();
+          break;
+      }
+    }
+    
+    function highlightOption(visibleOptions, index, container) {
+      // Remove previous highlight
+      removeHighlight(container);
+      
+      if (index >= 0 && index < visibleOptions.length) {
+        const option = visibleOptions[index];
+        option.classList.add('highlighted');
+        option.style.background = 'rgba(100,149,237,0.3)'; // Cornflower blue highlight
+        
+        // Scroll into view if needed
+        option.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        
+        container.dataset.highlightedIndex = index;
+      }
+    }
+    
+    function removeHighlight(container) {
+      const filterKey = container.id.replace('filter-options-', '');
+      container.querySelectorAll('.filter-option.highlighted').forEach(opt => {
+        opt.classList.remove('highlighted');
+        const optionText = opt.textContent.replace('✓', '').trim();
+        const state = filterState[filterKey];
+        if (state) {
+          opt.style.background = state.selected.has(optionText) ? 'rgba(255,255,255,0.08)' : '';
+        }
+      });
+    }
+
+    function renderFilterOptions(kind) {
+      const state = filterState[kind];
+      const container = document.getElementById(`filter-options-${kind}`);
+      if (!container) return;
+      container.innerHTML = "";
+      state.options.forEach(opt => {
+        const div = document.createElement("div");
+        div.className = "filter-option" + (state.selected.has(opt) ? " selected" : "");
+        div.innerHTML = `<span>${opt || "(empty)"}</span><span class="filter-check">✓</span>`;
+        div.addEventListener("click", ev => {
+          ev.stopPropagation();
+          if (state.selected.has(opt)) {
+            state.selected.delete(opt);
+          } else {
+            state.selected.add(opt);
+          }
+          renderFilterOptions(kind);
+          refresh();
+        });
+        container.appendChild(div);
+      });
+    }
+
+    function buildHeaderFilters() {
+      FILTER_FIELDS.forEach(field => {
+        const th = document.querySelector(`th[data-filter="${field.key}"]`);
+        if (!th) return;
+        const icon = th.querySelector(".filter-icon");
+        if (icon && !icon.dataset.bound) {
+          icon.dataset.bound = "1";
+          icon.addEventListener("click", ev => {
+            ev.stopPropagation();
+            toggleFilterDropdown(field.key);
+          });
+        }
+        if (!document.getElementById(`filter-dd-${field.key}`)) {
+          const dd = document.createElement("div");
+          dd.id = `filter-dd-${field.key}`;
+          dd.className = "filter-dropdown";
+          dd.onclick = ev => ev.stopPropagation();
+          dd.innerHTML = `
+            <input id="filter-search-${field.key}" class="filter-search" placeholder="Search (supports regex)..." oninput="filterFilterOptions('${field.key}')" autocomplete="off" />
+            <div id="filter-options-${field.key}" class="filter-options"></div>
+          `;
+          th.appendChild(dd);
+          
+          // Add keyboard handler after the element is added to DOM
+          setTimeout(() => {
+            const searchInput = document.getElementById(`filter-search-${field.key}`);
+            if (searchInput) {
+              searchInput.addEventListener('keydown', (e) => handleSearchKeydown(e, field.key));
+            }
+          }, 0);
+        }
+      });
+    }
+
+    function buildSortHandlers() {
+      document.querySelectorAll("th[data-sort]").forEach(th => {
+        const sortIcon = th.querySelector(".sort-icon");
+        if (sortIcon && !sortIcon.dataset.bound) {
+          sortIcon.dataset.bound = "1";
+          sortIcon.addEventListener("click", ev => {
+            ev.stopPropagation();
+            const key = th.dataset.sort;
+            if (sortKey === key) {
+              sortDir = -sortDir;
+            } else {
+              sortKey = key;
+              sortDir = 1;
+            }
+            document.querySelectorAll(".sort-icon").forEach(ic => {
+              ic.textContent = "↕";
+              ic.style.color = "";
+            });
+            sortIcon.textContent = sortDir === 1 ? "↑" : "↓";
+            sortIcon.style.color = "var(--accent-primary)";
+            refresh();
+          });
+        }
+      });
+    }
+
+    async function loadTrusts() {
+      try {
+        clearError();
+        tbody.innerHTML = '<tr><td colspan="6" style="padding:16px;text-align:center;">Loading...</td></tr>';
+        const data = await api("/v1/network/trusts");
+        trustRows = Array.isArray(data.items) ? data.items : Array.isArray(data) ? data : [];
+        FILTER_FIELDS.forEach(field => {
+          const seen = new Set();
+          trustRows.forEach(row => {
+            const val = formatFieldValue(row, field.key);
+            if (val) seen.add(val);
+          });
+          filterState[field.key].options = Array.from(seen).sort();
+          renderFilterOptions(field.key);
+        });
+        refresh();
+      } catch (e) {
+        showError(String(e));
+      }
+    }
+
+    refreshBtn.addEventListener("click", loadTrusts);
+    document.getElementById("logout-btn").onclick = redirectToLogin;
+    document.addEventListener("click", () => closeAllFilterDropdowns());
+    buildHeaderFilters();
+    buildSortHandlers();
+    loadTrusts();
+  </script>
+</body>
+</html>

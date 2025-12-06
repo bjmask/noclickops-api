@@ -1,15 +1,108 @@
 <div class="brand">
   <div class="brand-icon">N</div>
   <span>NoClickOps</span>
+  <button id="nav-collapse-btn" class="nav-collapse-toggle" title="Collapse navigation">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+    </svg>
+  </button>
 </div>
 
 <div class="nav-group">
-  <div class="nav-label">Platform</div>
-  <a class="nav-link __ACTIVE_DASHBOARD__" href="/dashboard.html">Dashboard</a>
-  <a class="nav-link __ACTIVE_SCANNERS__" href="/scanners.html">Scanners</a>
-  <a class="nav-link __ACTIVE_NETWORK__" href="/network.html">Network</a>
-  <a class="nav-link __ACTIVE_PORTSCANS__" href="/portscans.html">Port Scanning</a>
-  <a class="nav-link __ACTIVE_FINDINGS__" href="/findings.html">Findings</a>
-  <a class="nav-link __ACTIVE_TRUSTS__" href="/trusts.html">Trusts</a>
-  <a class="nav-link __ACTIVE_DOCS__" href="/docs.html">Docs</a>
+  <div class="nav-section-header" data-section="dashboard">
+    <div class="nav-label">Dashboard</div>
+    <svg class="nav-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2">
+      <polyline points="6 9 12 15 18 9"></polyline>
+    </svg>
+  </div>
+  <div class="nav-section-content" data-section-content="dashboard">
+    <a class="nav-link __ACTIVE_DASHBOARD__" href="/dashboard.html">Overview</a>
+  </div>
+</div>
+
+<div class="nav-group">
+  <div class="nav-section-header" data-section="scanners">
+    <div class="nav-label">Scanners</div>
+    <svg class="nav-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2">
+      <polyline points="6 9 12 15 18 9"></polyline>
+    </svg>
+  </div>
+  <div class="nav-section-content" data-section-content="scanners">
+    <a class="nav-link __ACTIVE_SCANNERS__" href="/scanners.html">Scanner Management</a>
+  </div>
+</div>
+
+<div class="nav-group">
+  <div class="nav-section-header" data-section="findings">
+    <div class="nav-label">Findings</div>
+    <svg class="nav-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2">
+      <polyline points="6 9 12 15 18 9"></polyline>
+    </svg>
+  </div>
+  <div class="nav-section-content" data-section-content="findings">
+    <a class="nav-link __ACTIVE_FINDINGS__" href="/findings.html">Security Findings</a>
+  </div>
+</div>
+
+<div class="nav-group">
+  <div class="nav-section-header" data-section="network">
+    <div class="nav-label">Network</div>
+    <svg class="nav-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2">
+      <polyline points="6 9 12 15 18 9"></polyline>
+    </svg>
+  </div>
+  <div class="nav-section-content" data-section-content="network">
+    <a class="nav-link __ACTIVE_NETWORK__" href="/network.html">Network Traffic</a>
+    <a class="nav-link __ACTIVE_NETWORK_TRUSTS__" href="/network_trusts.html">Network Trusts</a>
+    <a class="nav-link __ACTIVE_PORTSCANS__" href="/portscans.html">Port Scanning</a>
+    <a class="nav-link __ACTIVE_DNS_EXFIL__" href="/dns_exfil.html">DNS Exfil Detection</a>
+  </div>
+</div>
+
+<div class="nav-group">
+  <div class="nav-section-header" data-section="iam">
+    <div class="nav-label">IAM</div>
+    <svg class="nav-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2">
+      <polyline points="6 9 12 15 18 9"></polyline>
+    </svg>
+  </div>
+  <div class="nav-section-content" data-section-content="iam">
+    <a class="nav-link __ACTIVE_TRUSTS__" href="/trusts.html">IAM Trusts</a>
+  </div>
+</div>
+
+<div class="nav-group">
+  <div class="nav-section-header" data-section="security">
+    <div class="nav-label">Security</div>
+    <svg class="nav-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2">
+      <polyline points="6 9 12 15 18 9"></polyline>
+    </svg>
+  </div>
+  <div class="nav-section-content" data-section-content="security">
+    <a class="nav-link __ACTIVE_SHELLS__" href="/security.html">Shell Executions</a>
+  </div>
+</div>
+
+<div class="nav-group">
+  <div class="nav-section-header" data-section="docs">
+    <div class="nav-label">Docs</div>
+    <svg class="nav-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2">
+      <polyline points="6 9 12 15 18 9"></polyline>
+    </svg>
+  </div>
+  <div class="nav-section-content" data-section-content="docs">
+    <a class="nav-link __ACTIVE_DOCS_AWS_TF__" href="/docs.html#aws-terraform">AWS (Terraform)</a>
+    <a class="nav-link __ACTIVE_DOCS_AWS_CLI__" href="/docs.html#aws-cli">AWS (CLI)</a>
+    <a class="nav-link __ACTIVE_DOCS_GCP_TF__" href="/docs.html#gcp-terraform">GCP (Terraform)</a>
+    <a class="nav-link __ACTIVE_DOCS_GCP_CLI__" href="/docs.html#gcp-cli">GCP (CLI)</a>
+    <a class="nav-link __ACTIVE_DOCS_AZURE_TF__" href="/docs.html#azure-terraform">Azure (Terraform)</a>
+    <a class="nav-link __ACTIVE_DOCS_AZURE_CLI__" href="/docs.html#azure-cli">Azure (CLI)</a>
+  </div>
 </div>

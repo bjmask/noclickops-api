@@ -7,6 +7,8 @@ jwt_secret: "change-me"
 deployment_type: "kubernetes"
 scanner_image: "noclickops-scanner:2025-12-02-36312b"
 mountApplicationDefaultCredentialsFromHost: true
+traffic_monitor_url: "http://127.0.0.1:8082/api/v1/findings"
+traffic_monitor_token: "foo"
 findings:
   poll_seconds: 60
   baseline:

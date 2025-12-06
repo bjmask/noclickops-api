@@ -15,10 +15,12 @@
       padding: 16px;
       overflow: auto;
     }
+
     .markdown-body code {
       font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
       font-size: 0.9em;
     }
+
     .markdown-body p code {
       background-color: rgba(255, 255, 255, 0.1);
       padding: 2px 4px;
@@ -31,17 +33,6 @@
   <div class="layout-dashboard">
     <aside>
       <div id="nav-container"></div>
-
-      <div class="nav-group">
-        <div class="nav-label">Documentation</div>
-        <a href="#" class="nav-link" onclick="toggleSub('aws-sub'); return false;">AWS ▼</a>
-        <div id="aws-sub" style="padding-left:16px;display:none;">
-          <a href="#" class="nav-link" onclick="loadDoc('aws-cli.md'); return false;">CLI</a>
-          <a href="#" class="nav-link" onclick="loadDoc('aws-terraform.md'); return false;">Terraform</a>
-        </div>
-        <a href="#" class="nav-link" onclick="loadDoc('gcp.md'); return false;">GCP (soon)</a>
-        <a href="#" class="nav-link" onclick="loadDoc('azure.md'); return false;">Azure (soon)</a>
-      </div>
 
       <div style="margin-top:auto;">
         <button id="logout-btn" class="btn btn-secondary" style="width:100%;">Logout</button>
@@ -80,24 +71,18 @@
 
     // Ensure Terraform aliases work regardless of whether the definition is named 'hcl' or 'terraform'
     if (window.hljs) {
-        const tf = window.hljs.getLanguage('terraform');
-        const hcl = window.hljs.getLanguage('hcl');
-        
-        if (tf && !hcl) {
-            hljs.registerLanguage('hcl', () => tf);
-        } else if (hcl && !tf) {
-            hljs.registerLanguage('terraform', () => hcl);
-            hljs.registerLanguage('tf', () => hcl);
-        }
+      const tf = window.hljs.getLanguage('terraform');
+      const hcl = window.hljs.getLanguage('hcl');
+
+      if (tf && !hcl) {
+        hljs.registerLanguage('hcl', () => tf);
+      } else if (hcl && !tf) {
+        hljs.registerLanguage('terraform', () => hcl);
+        hljs.registerLanguage('tf', () => hcl);
+      }
     }
 
-    function toggleSub(id) {
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.style.display = el.style.display === "none" ? "block" : "none";
-    }
-
-    async function loadDoc(file, anchor) {
+    async function loadDoc(file) {
       try {
         let res = await fetch(`/docs/assets/${file}`);
         if (!res.ok) {
@@ -111,13 +96,43 @@
         document.querySelectorAll('pre code').forEach((block) => {
           hljs.highlightElement(block);
         });
-        if (anchor) {
-          const el = document.getElementById(anchor);
-          if (el) el.scrollIntoView({ behavior: "smooth" });
-        }
       } catch (e) {
         document.getElementById("content").innerHTML = `<div class="text-muted">Failed to load ${file}</div>`;
       }
+    }
+
+    function handleHashChange() {
+      const hash = window.location.hash.slice(1); // Remove the '#'
+      if (hash === 'aws-terraform') {
+        loadDoc('aws-terraform.md');
+      } else if (hash === 'aws-cli') {
+        loadDoc('aws-cli.md');
+      } else if (hash === 'gcp-terraform') {
+        loadDoc('gcp-terraform.md');
+      } else if (hash === 'gcp-cli') {
+        loadDoc('gcp-cli.md');
+      } else if (hash === 'azure-terraform') {
+        loadDoc('azure-terraform.md');
+      } else if (hash === 'azure-cli') {
+        loadDoc('azure-cli.md');
+      } else if (hash === 'aws') {
+        // Legacy support - redirect to CLI
+        loadDoc('aws-cli.md');
+      } else if (hash === 'gcp') {
+        loadDoc('gcp.md');
+      } else if (hash === 'azure') {
+        loadDoc('azure.md');
+      } else if (hash) {
+        loadDoc(hash);
+      }
+    }
+
+    // Handle hash changes
+    window.addEventListener('hashchange', handleHashChange);
+
+    // Load initial content based on hash
+    if (window.location.hash) {
+      handleHashChange();
     }
 
     function redirectToLogin() {

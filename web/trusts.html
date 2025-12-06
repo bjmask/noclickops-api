@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Trusted Rules</title>
+  <title>IAM Trusts</title>
   <link rel="stylesheet" href="/static/style.css" />
   <script src="/static/nav.js"></script>
 </head>
@@ -19,21 +19,21 @@
     <main>
       <div class="page-header">
         <div>
-          <h1 class="page-title">Trusted Rules</h1>
+          <h1 class="page-title">IAM Trusts</h1>
           <p class="text-muted" style="margin-top:6px;">Define user/resource/verb patterns to hide from Findings by default.</p>
         </div>
         <div style="display:flex;gap:12px;align-items:flex-end;">
           <div class="input-group" style="max-width:220px;">
             <label class="input-label">User (glob or /regex/)</label>
-            <input id="user-pattern" placeholder="user@example.com or admin*" />
+            <input id="user-pattern" placeholder="user@example.com or admin*" autocomplete="off" />
           </div>
           <div class="input-group" style="max-width:220px;">
             <label class="input-label">Resource</label>
-            <input id="resource-pattern" placeholder="pods or *" />
+            <input id="resource-pattern" placeholder="pods or *" autocomplete="off" />
           </div>
           <div class="input-group" style="max-width:220px;">
             <label class="input-label">Verb</label>
-            <input id="verb-pattern" placeholder="FilterLogEvents or *" />
+            <input id="verb-pattern" placeholder="FilterLogEvents or *" autocomplete="off" />
           </div>
           <button class="btn btn-primary" style="height:42px;margin-bottom:2px;" onclick="addRule()">Add</button>
         </div>

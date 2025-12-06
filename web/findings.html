@@ -7,6 +7,7 @@
   <title>NoClickOps Findings</title>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/nav.js"></script>
+  <script src="/static/table-utils.js"></script>
 </head>
 
 <body>
@@ -42,13 +43,13 @@
           <table id="findings-table">
             <thead>
               <tr>
-                <th data-sort="ts" style="cursor:pointer;">Time ↕</th>
-                <th data-sort="scanner" style="cursor:pointer;">Scanner ↕</th>
-                <th data-sort="source" style="cursor:pointer;">Source ↕</th>
-                <th data-sort="verb" style="cursor:pointer;">Verb/Event ↕</th>
-                <th data-sort="actor" style="cursor:pointer;">Actor ↕</th>
-                <th data-sort="resource" style="cursor:pointer;">Resource ↕</th>
-                <th data-sort="namespace" style="cursor:pointer;">Namespace ↕</th>
+                <th data-sort="ts" data-filter="ts">Time</th>
+                <th data-sort="scanner" data-filter="scanner">Scanner</th>
+                <th data-sort="source" data-filter="source">Source</th>
+                <th data-sort="verb" data-filter="verb">Verb/Event</th>
+                <th data-sort="actor" data-filter="actor">Actor</th>
+                <th data-sort="resource" data-filter="resource">Resource</th>
+                <th data-sort="namespace" data-filter="namespace">Namespace</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -67,10 +68,8 @@
     const err = document.getElementById("err");
     const logoutBtn = document.getElementById("logout-btn");
     const findingsMeta = document.getElementById("findings-meta");
-    const findingsTableBody = document.querySelector("#findings-table tbody");
     let currentFindings = [];
-    let sortKey = "ts";
-    let sortDir = -1; // -1 desc, 1 asc
+    let table;
 
     function api(path, opts = {}) {
       const headers = opts.headers || {};
@@ -109,47 +108,22 @@
         return trustFilter === "yes" ? trusted : !trusted;
       });
 
-      const sorted = [...filtered].sort((a, b) => {
-        const av = a[sortKey] || "";
-        const bv = b[sortKey] || "";
-        if (av < bv) return -1 * sortDir;
-        if (av > bv) return 1 * sortDir;
-        return 0;
-      });
+      // Prepare data for StandardTable
+      const tableData = filtered.map(f => ({
+        ts: f.ts,
+        _render_ts: `<span style="white-space:nowrap;color:var(--text-muted);">${f.ts}</span>`,
+        scanner: f.scanner,
+        _render_scanner: `<span class="tag">${f.scanner}</span>`,
+        source: f.source,
+        verb: f.verb || "-",
+        _render_verb: `<span style="font-weight:500;color:var(--accent-primary);">${f.verb || "-"}</span>`,
+        actor: f.actor || "-",
+        resource: f.resource || "-",
+        namespace: f.namespace || "-",
+      }));
 
-      if (sorted.length === 0) {
-        findingsTableBody.innerHTML = `<tr><td colspan="7" class="text-center text-muted" style="padding:32px;">No findings found.</td></tr>`;
-        findingsMeta.textContent = "0 findings";
-        return;
-      }
-
-      findingsTableBody.innerHTML = sorted.map(f => `
-        <tr>
-          <td style="white-space:nowrap;color:var(--text-muted);">${f.ts}</td>
-          <td><span class="tag">${f.scanner}</span></td>
-          <td>${f.source}</td>
-          <td style="font-weight:500;color:var(--accent-primary);">${f.verb || "-"}</td>
-          <td>${f.actor || "-"}</td>
-          <td>${f.resource || "-"}</td>
-          <td>${f.namespace || "-"}</td>
-        </tr>
-      `).join("");
-      findingsMeta.textContent = `${sorted.length} finding(s)`;
-    }
-
-    function setupSort() {
-      document.querySelectorAll("#findings-table th").forEach(th => {
-        th.addEventListener("click", () => {
-          const key = th.getAttribute("data-sort");
-          if (sortKey === key) {
-            sortDir = -sortDir;
-          } else {
-            sortKey = key;
-            sortDir = -1;
-          }
-          renderFindings();
-        });
-      });
+      table.setData(tableData);
+      findingsMeta.textContent = `${tableData.length} finding(s)`;
     }
 
     async function loadFindings() {
@@ -176,9 +150,14 @@
     }
 
     logoutBtn.addEventListener("click", redirectToLogin);
-
-    setupSort();
     document.getElementById("trusted-filter").addEventListener("change", renderFindings);
+
+    // Initialize StandardTable
+    table = new StandardTable('findings-table', {
+      defaultSort: 'ts',
+      defaultDir: -1
+    });
+
     if (token) loadFindings(); else redirectToLogin();
   </script>
 </body>

@@ -26,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -42,14 +43,15 @@ import (
 )
 
 type Config struct {
-	DatabaseURL       string         `yaml:"database_url"`
-	AdminDatabaseURL  string         `yaml:"admin_database_url"`
-	JWTSecret         string         `yaml:"jwt_secret"`
-	DeploymentType    string         `yaml:"deployment_type"` // "process" or "docker"
-	ScannerImage      string         `yaml:"scanner_image"`
-	MountADCFromHost  bool           `yaml:"mountApplicationDefaultCredentialsFromHost"`
-	TrafficMonitorURL string         `yaml:"traffic_monitor_url"`
-	Findings          FindingsConfig `yaml:"findings"`
+	DatabaseURL         string         `yaml:"database_url"`
+	AdminDatabaseURL    string         `yaml:"admin_database_url"`
+	JWTSecret           string         `yaml:"jwt_secret"`
+	DeploymentType      string         `yaml:"deployment_type"` // "process" or "docker"
+	ScannerImage        string         `yaml:"scanner_image"`
+	MountADCFromHost    bool           `yaml:"mountApplicationDefaultCredentialsFromHost"`
+	TrafficMonitorURL   string         `yaml:"traffic_monitor_url"`
+	TrafficMonitorToken string         `yaml:"traffic_monitor_token"`
+	Findings            FindingsConfig `yaml:"findings"`
 }
 
 type FindingsConfig struct {
@@ -122,6 +124,7 @@ type app struct {
 	image             string
 	mountADC          bool
 	trafficMonitorURL string
+	trafficMonitorTok string
 	portScanMu        sync.RWMutex
 	portScans         []PortScanFinding
 	portScanUpdated   time.Time
@@ -135,6 +138,12 @@ type app struct {
 	baselineMinSpan   time.Duration
 	policyCacheMu     sync.RWMutex
 	policyCache       map[string]bool
+}
+
+func (a *app) addTrafficAuth(req *http.Request) {
+	if strings.TrimSpace(a.trafficMonitorTok) != "" {
+		req.Header.Set("Authorization", "Bearer "+a.trafficMonitorTok)
+	}
 }
 
 type PortScanFinding struct {
@@ -183,8 +192,9 @@ func main() {
 	scannerImage := firstNonEmpty(os.Getenv("SCANNER_IMAGE"), cfg.ScannerImage)
 	trafficMonitorURL := firstNonEmpty(os.Getenv("TRAFFIC_MONITOR_URL"), cfg.TrafficMonitorURL)
 	if trafficMonitorURL == "" {
-		trafficMonitorURL = "http://127.0.0.1:8001/api/v1/namespaces/traffic-monitor/services/traffic-monitor:3000/proxy/api/v1/findings"
+		trafficMonitorURL = "http://127.0.0.1:8001/api/v1/namespaces/traffic-monitor/services/traffic-collector:8082/proxy/api/v1/findings"
 	}
+	trafficMonitorToken := firstNonEmpty(os.Getenv("TRAFFIC_MONITOR_TOKEN"), cfg.TrafficMonitorToken)
 	if scannerImage == "" {
 		scannerImage = "noclickops-scanner:latest2"
 	}
@@ -218,6 +228,7 @@ func main() {
 		image:             scannerImage,
 		mountADC:          cfg.MountADCFromHost,
 		trafficMonitorURL: trafficMonitorURL,
+		trafficMonitorTok: trafficMonitorToken,
 		portScanInterval:  time.Duration(cfg.Findings.PollSeconds) * time.Second,
 		baselines:         make(map[BaselineKey]*BaselineEntry),
 		baselineInterval:  time.Duration(cfg.Findings.Baseline.PollSeconds) * time.Second,
@@ -248,6 +259,7 @@ func main() {
 	defer cancel()
 
 	router := gin.Default()
+	router.Use(gzip.Gzip(gzip.DefaultCompression))
 	staticDir := resolveDir("web/static")
 	router.Static("/static", staticDir)
 	router.StaticFile("/", "web/index.html")
@@ -259,12 +271,18 @@ func main() {
 	router.StaticFile("/findings.html", "web/findings.html")
 	router.StaticFile("/network", "web/network.html")
 	router.StaticFile("/network.html", "web/network.html")
+	router.StaticFile("/network_trusts", "web/network_trusts.html")
+	router.StaticFile("/network_trusts.html", "web/network_trusts.html")
 	router.StaticFile("/portscans", "web/portscans.html")
 	router.StaticFile("/portscans.html", "web/portscans.html")
+	router.StaticFile("/dns_exfil", "web/dns_exfil.html")
+	router.StaticFile("/dns_exfil.html", "web/dns_exfil.html")
 	router.StaticFile("/docs", "web/docs.html")
 	router.StaticFile("/docs.html", "web/docs.html")
 	router.StaticFile("/trusts", "web/trusts.html")
 	router.StaticFile("/trusts.html", "web/trusts.html")
+	router.StaticFile("/security", "web/security.html")
+	router.StaticFile("/security.html", "web/security.html")
 	router.StaticFile("/nav.html", "web/nav.html")
 	router.StaticFile("/favicon.ico", "web/favicon.ico")
 	docDir := resolveDir("docs")
@@ -292,6 +310,7 @@ func main() {
 	protected.PUT("/scanners/:name", app.handleScannerPut)
 	protected.DELETE("/scanners/:name", app.handleScannerDelete)
 	protected.GET("/me", app.handleMe)
+	protected.GET("/scanners/health", app.handleAllScannersHealth)
 	protected.GET("/scanners/:name/health", app.handleScannerHealth)
 	protected.GET("/scanners/:name/logs", app.handleScannerLogs)
 	protected.GET("/scanners/:name/findings", app.handleScannerFindings)
@@ -306,8 +325,12 @@ func main() {
 	protected.GET("/network/findings", app.handleNetworkFindings)
 	protected.GET("/network/schema", app.handleNetworkSchema)
 	protected.GET("/network/keys", app.handleNetworkKeys)
+	protected.GET("/network/trusts", app.handleNetworkTrusts)
 	protected.GET("/network/portscans", app.handlePortScans)
 	protected.GET("/network/baseline", app.handleBaseline)
+	protected.GET("/network/dns", app.handleDNSQueries)
+
+	protected.GET("/security/shells", app.handleShellExecutions)
 
 	addr := ":8080"
 	log.Printf("API listening on %s", addr)
@@ -919,6 +942,105 @@ func (a *app) handleScannerHealth(c *gin.Context) {
 	})
 }
 
+type ScannerHealthStatus struct {
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Ready   int32  `json:"ready,omitempty"`
+	PID     int    `json:"pid,omitempty"`
+	Started bool   `json:"started"`
+	Error   string `json:"error,omitempty"`
+}
+
+func (a *app) handleAllScannersHealth(c *gin.Context) {
+	principal := c.MustGet("principal").(*User)
+	var scanners []Scanner
+	if err := a.db.WithContext(c.Request.Context()).Where("tenant_id = ?", principal.TenantID).Find(&scanners).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch scanners"})
+		return
+	}
+
+	var tenant Tenant
+	if err := a.db.WithContext(c.Request.Context()).First(&tenant, principal.TenantID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "tenant not found"})
+		return
+	}
+
+	// Fetch health for all scanners
+	results := make([]ScannerHealthStatus, len(scanners))
+	var wg sync.WaitGroup
+
+	for i, scanner := range scanners {
+		wg.Add(1)
+		go func(idx int, sc Scanner) {
+			defer wg.Done()
+			health := a.getScannerHealthStatus(c.Request.Context(), &sc, &tenant)
+			results[idx] = health
+		}(i, scanner)
+	}
+
+	wg.Wait()
+	c.JSON(http.StatusOK, gin.H{"scanners": results})
+}
+
+func (a *app) getScannerHealthStatus(ctx context.Context, scanner *Scanner, tenant *Tenant) ScannerHealthStatus {
+	result := ScannerHealthStatus{
+		Name:    scanner.Name,
+		Status:  "unknown",
+		Started: false,
+	}
+
+	names := namesForScanner(scanner.Name)
+
+	if a.deploy == "kubernetes" {
+		ns := namespaceFor(tenant.Name)
+		if a.kube == nil {
+			result.Status = "error"
+			result.Error = "kube client not initialized"
+			return result
+		}
+
+		dep, err := a.kube.AppsV1().Deployments(ns).Get(ctx, names.deploy, metav1.GetOptions{})
+		if err != nil {
+			result.Status = "not_found"
+			result.Error = err.Error()
+			return result
+		}
+
+		ready := dep.Status.ReadyReplicas
+		result.Ready = ready
+		if ready > 0 {
+			result.Status = "running"
+			result.Started = true
+		} else {
+			result.Status = "pending"
+		}
+		return result
+	}
+
+	// Process mode
+	result.Status = "not_started"
+	a.mu.Lock()
+	cmd := a.procs[scanner.ID]
+	a.mu.Unlock()
+
+	if cmd != nil && cmd.Process != nil {
+		result.PID = cmd.Process.Pid
+		running := cmd.ProcessState == nil || !cmd.ProcessState.Exited()
+		if running {
+			if err := cmd.Process.Signal(syscall.Signal(0)); err == nil {
+				result.Status = "running"
+				result.Started = true
+			} else {
+				result.Status = "stopped"
+			}
+		} else {
+			result.Status = "stopped"
+		}
+	}
+
+	return result
+}
+
 func (a *app) handleScannerLogs(c *gin.Context) {
 	principal := c.MustGet("principal").(*User)
 	name := c.Param("name")
@@ -1409,6 +1531,7 @@ func (a *app) handleNetworkFindings(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	a.addTrafficAuth(req)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
@@ -1447,6 +1570,7 @@ func (a *app) handleNetworkSchema(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	a.addTrafficAuth(req)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
@@ -1463,6 +1587,153 @@ func (a *app) handleNetworkSchema(c *gin.Context) {
 		return
 	}
 	c.Data(http.StatusOK, "application/json", body)
+}
+
+func (a *app) handleNetworkTrusts(c *gin.Context) {
+	if a.trafficMonitorURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "traffic monitor URL not configured"})
+		return
+	}
+	// Build query params, defaulting to collapse=none and hide_src_port=true for matching.
+	qs := c.Request.URL.Query()
+	if qs.Get("collapse") == "" {
+		qs.Set("collapse", "none")
+	}
+	if qs.Get("hide_src_port") == "" {
+		qs.Set("hide_src_port", "true")
+	}
+	if qs.Get("per_page") == "" {
+		qs.Set("per_page", "500")
+	}
+	if qs.Get("page") == "" {
+		qs.Set("page", "1")
+	}
+
+	type trustEdge struct {
+		Src       string `json:"src"`
+		Dst       string `json:"dst"`
+		Namespace string `json:"namespace"`
+		Direction string `json:"direction"`
+		Policy    string `json:"policy"`
+		Ports     []int  `json:"ports"`
+	}
+	type finding struct {
+		S       string `json:"s"`
+		T       string `json:"t"`
+		Proto   int    `json:"proto"`
+		DstPort *int   `json:"dst_port"`
+		Packets int64  `json:"packets_ab"`
+	}
+	// Fetch trusts
+	trustURL := strings.Replace(a.trafficMonitorURL, "/findings", "/trusts", 1) + "?" + qs.Encode()
+	trustReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, trustURL, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	a.addTrafficAuth(trustReq)
+	trustResp, err := http.DefaultClient.Do(trustReq)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	defer trustResp.Body.Close()
+	trustBody, err := io.ReadAll(trustResp.Body)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	if trustResp.StatusCode < 200 || trustResp.StatusCode >= 300 {
+		c.JSON(trustResp.StatusCode, gin.H{"error": string(trustBody)})
+		return
+	}
+	var trusts []trustEdge
+	if err := json.Unmarshal(trustBody, &trusts); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "decode trusts: " + err.Error()})
+		return
+	}
+
+	// Fetch findings with same filters
+	findURL := a.trafficMonitorURL + "?" + qs.Encode()
+	findReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, findURL, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	a.addTrafficAuth(findReq)
+	findResp, err := http.DefaultClient.Do(findReq)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	defer findResp.Body.Close()
+	findBody, err := io.ReadAll(findResp.Body)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	if findResp.StatusCode < 200 || findResp.StatusCode >= 300 {
+		c.JSON(findResp.StatusCode, gin.H{"error": string(findBody)})
+		return
+	}
+	var findWrapper struct {
+		Items []finding `json:"items"`
+		Total int       `json:"total"`
+	}
+	if err := json.Unmarshal(findBody, &findWrapper); err != nil {
+		// fallback to bare array
+		if err := json.Unmarshal(findBody, &findWrapper.Items); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "decode findings: " + err.Error()})
+			return
+		}
+	}
+
+	// Build rows with trust match
+	type row struct {
+		Src     string `json:"src"`
+		Dst     string `json:"dst"`
+		Proto   int    `json:"proto"`
+		DstPort int    `json:"dst_port"`
+		Trusted bool   `json:"trusted"`
+		Policy  string `json:"policy,omitempty"`
+	}
+	match := func(f finding) (bool, string) {
+		port := 0
+		if f.DstPort != nil {
+			port = *f.DstPort
+		}
+		for _, t := range trusts {
+			if t.Src == f.S && t.Dst == f.T {
+				if len(t.Ports) == 0 {
+					return true, t.Policy
+				}
+				for _, p := range t.Ports {
+					if p == 0 || port == p {
+						return true, t.Policy
+					}
+				}
+			}
+		}
+		return false, ""
+	}
+
+	rows := make([]row, 0, len(findWrapper.Items))
+	for _, f := range findWrapper.Items {
+		ok, pol := match(f)
+		port := 0
+		if f.DstPort != nil {
+			port = *f.DstPort
+		}
+		rows = append(rows, row{
+			Src:     f.S,
+			Dst:     f.T,
+			Proto:   f.Proto,
+			DstPort: port,
+			Trusted: ok,
+			Policy:  pol,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"items": rows})
 }
 
 func (a *app) handleNetworkKeys(c *gin.Context) {
@@ -1484,6 +1755,7 @@ func (a *app) handleNetworkKeys(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	a.addTrafficAuth(req)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
@@ -1539,6 +1811,84 @@ func (a *app) handleBaseline(c *gin.Context) {
 		"updated_at": updated,
 		"interval_s": int(a.baselineInterval.Seconds()),
 	})
+}
+
+func (a *app) handleDNSQueries(c *gin.Context) {
+	if a.trafficMonitorURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "traffic monitor URL not configured"})
+		return
+	}
+	// Replace /findings with /network/dns in the base URL
+	dnsURL := strings.Replace(a.trafficMonitorURL, "/findings", "/network/dns", 1)
+	raw := c.Request.URL.RawQuery
+	if raw != "" {
+		sep := "?"
+		if strings.Contains(dnsURL, "?") {
+			sep = "&"
+		}
+		dnsURL = dnsURL + sep + raw
+	}
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, dnsURL, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	a.addTrafficAuth(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		c.JSON(resp.StatusCode, gin.H{"error": string(body)})
+		return
+	}
+	c.Data(http.StatusOK, "application/json", body)
+}
+
+func (a *app) handleShellExecutions(c *gin.Context) {
+	if a.trafficMonitorURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "traffic monitor URL not configured"})
+		return
+	}
+	// Replace /findings with /security/shells in the base URL
+	shellsURL := strings.Replace(a.trafficMonitorURL, "/findings", "/security/shells", 1)
+	raw := c.Request.URL.RawQuery
+	if raw != "" {
+		sep := "?"
+		if strings.Contains(shellsURL, "?") {
+			sep = "&"
+		}
+		shellsURL = shellsURL + sep + raw
+	}
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, shellsURL, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	a.addTrafficAuth(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		c.JSON(resp.StatusCode, gin.H{"error": string(body)})
+		return
+	}
+	c.Data(http.StatusOK, "application/json", body)
 }
 
 func (a *app) startPortScanWatcher(ctx context.Context) {
@@ -1741,6 +2091,7 @@ func (a *app) fetchAllNetworkFindings(ctx context.Context) ([]map[string]interfa
 		if err != nil {
 			return nil, err
 		}
+		a.addTrafficAuth(req)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return nil, err

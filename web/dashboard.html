@@ -32,7 +32,8 @@
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
           <h2 style="margin:0;">Scanners</h2>
           <div style="display:flex;gap:12px;align-items:center;">
-            <input id="filter-input" placeholder="Filter scanners..." style="padding:8px;border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--text-main);" />
+            <input id="filter-input" placeholder="Filter scanners..."
+              style="padding:8px;border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--text-main);" />
             <span class="text-muted" id="scanner-count">0 scanners</span>
             <button class="btn btn-primary" onclick="window.location.href='/scanners.html'">Add Scanner</button>
           </div>
@@ -52,22 +53,6 @@
 
   <script>
     mountNav('dashboard');
-
-    (function loadNav() {
-      fetch('/nav.html').then(r => r.text()).then(html => {
-        const container = document.getElementById("nav-container");
-        container.innerHTML = html;
-        // Highlight current page
-        const path = window.location.pathname;
-        container.querySelectorAll(".nav-link").forEach(a => {
-          if (a.getAttribute("href") === path) {
-            a.classList.add("active");
-          } else {
-            a.classList.remove("active");
-          }
-        });
-      }).catch(() => {});
-    })();
 
     let token = localStorage.getItem("noclickops_token") || "";
     const err = document.getElementById("err");
@@ -130,14 +115,13 @@
       try {
         clearError();
         const list = await api("/v1/scanners");
-        // fetch health per scanner
-        allScanners = await Promise.all(list.map(async s => {
-          try {
-            const h = await api(`/v1/scanners/${encodeURIComponent(s.name)}/health`);
-            return { ...s, status: h.status || "unknown" };
-          } catch (_) {
-            return { ...s, status: "unknown" };
-          }
+        // Fetch all scanner health in one call
+        const healthData = await api("/v1/scanners/health");
+        const healthMap = new Map(healthData.scanners.map(h => [h.name, h.status]));
+
+        allScanners = list.map(s => ({
+          ...s,
+          status: healthMap.get(s.name) || "unknown"
         }));
         renderScanners();
       } catch (e) {
@@ -146,42 +130,42 @@
     }
 
     function renderScanners() {
-        const term = filterInput.value.toLowerCase();
-        const filtered = allScanners.filter(s => {
-            if (!term) return true;
-            if (s.name.toLowerCase().includes(term)) return true;
-            if (String(s.id).includes(term)) return true;
-            if (s.cloud_provider.toLowerCase().includes(term)) return true;
-            // Check labels
-            if (s.labels) {
-                const labels = typeof s.labels === 'string' ? JSON.parse(s.labels) : s.labels;
-                for (const [k, v] of Object.entries(labels || {})) {
-                    if (k.toLowerCase().includes(term) || v.toLowerCase().includes(term)) return true;
-                }
-            }
-            return false;
-        });
+      const term = filterInput.value.toLowerCase();
+      const filtered = allScanners.filter(s => {
+        if (!term) return true;
+        if (s.name.toLowerCase().includes(term)) return true;
+        if (String(s.id).includes(term)) return true;
+        if (s.cloud_provider.toLowerCase().includes(term)) return true;
+        // Check labels
+        if (s.labels) {
+          const labels = typeof s.labels === 'string' ? JSON.parse(s.labels) : s.labels;
+          for (const [k, v] of Object.entries(labels || {})) {
+            if (k.toLowerCase().includes(term) || v.toLowerCase().includes(term)) return true;
+          }
+        }
+        return false;
+      });
 
-        scannerCount.textContent = `${filtered.length} scanner(s)`;
+      scannerCount.textContent = `${filtered.length} scanner(s)`;
 
-        if (filtered.length === 0) {
-          scannerList.innerHTML = `<div class="text-muted text-center" style="padding:20px;">No scanners found matching filter.</div>`;
-          return;
+      if (filtered.length === 0) {
+        scannerList.innerHTML = `<div class="text-muted text-center" style="padding:20px;">No scanners found matching filter.</div>`;
+        return;
+      }
+
+      scannerList.innerHTML = filtered.map(s => {
+        const st = (s.status || "unknown").toLowerCase();
+        const statusClass = st === "running" ? "status-green" : st === "pending" ? "status-yellow" : "status-red";
+
+        let labelHtml = "";
+        if (s.labels) {
+          const labels = typeof s.labels === 'string' ? JSON.parse(s.labels) : s.labels;
+          labelHtml = Object.entries(labels || {}).map(([k, v]) =>
+            `<span class="tag" style="font-size:0.7rem;margin-left:4px;">${k}=${v}</span>`
+          ).join("");
         }
 
-        scannerList.innerHTML = filtered.map(s => {
-          const st = (s.status || "unknown").toLowerCase();
-          const statusClass = st === "running" ? "status-green" : st === "pending" ? "status-yellow" : "status-red";
-          
-          let labelHtml = "";
-          if (s.labels) {
-              const labels = typeof s.labels === 'string' ? JSON.parse(s.labels) : s.labels;
-              labelHtml = Object.entries(labels || {}).map(([k, v]) =>
-                  `<span class="tag" style="font-size:0.7rem;margin-left:4px;">${k}=${v}</span>`
-              ).join("");
-          }
-
-          return `
+        return `
           <a href="/scanners/${encodeURIComponent(s.name)}" style="display:block;text-decoration:none;">
             <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:var(--radius-sm);padding:16px;display:flex;justify-content:space-between;align-items:center;transition:background 0.2s;">
               <div style="display:flex;align-items:center;gap:12px;">
@@ -198,7 +182,7 @@
             </div>
           </a>
         `;
-        }).join("");
+      }).join("");
     }
 
     filterInput.addEventListener("input", renderScanners);
