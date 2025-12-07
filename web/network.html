@@ -101,8 +101,8 @@
                 <th class="col-proto" data-sort="proto" data-filter="proto"><div class="th-wrap"><span>Proto</span><div class="th-actions"><span class="sort-icon">↕</span><span class="filter-icon">⌃</span></div></div></th>
                 <th data-sort="dst_port" data-filter="dst_port" class="col-port"><div class="th-wrap"><span>Destination Port</span><div class="th-actions"><span class="sort-icon">↕</span><span class="filter-icon">⌃</span></div></div></th>
                 <th data-sort="http" data-filter="http" class="col-http"><div class="th-wrap"><span>HTTP Endpoint</span><div class="th-actions"><span class="sort-icon">↕</span><span class="filter-icon">⌃</span></div></div></th>
-                <th data-sort="packets_ab" class="col-packets"><div class="th-wrap"><span>Packets A→B</span><div class="th-actions"><span class="sort-icon">↕</span></div></div></th>
-                <th data-sort="packets_ba" class="col-packets"><div class="th-wrap"><span>Packets B→A</span><div class="th-actions"><span class="sort-icon">↕</span></div></div></th>
+                <th data-sort="p_ab" class="col-packets"><div class="th-wrap"><span>Packets A→B</span><div class="th-actions"><span class="sort-icon">↕</span></div></div></th>
+                <th data-sort="p_ba" class="col-packets"><div class="th-wrap"><span>Packets B→A</span><div class="th-actions"><span class="sort-icon">↕</span></div></div></th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -334,8 +334,8 @@
     function sortedRows(rows) {
       if (sortKey === "server") return rows;
       return [...rows].sort((a, b) => {
-        const av = sortKey === "packets" ? (Number(a.packets_ab || 0) + Number(a.packets_ba || 0)) : a[sortKey];
-        const bv = sortKey === "packets" ? (Number(b.packets_ab || 0) + Number(b.packets_ba || 0)) : b[sortKey];
+        const av = sortKey === "packets" ? (Number(a.p_ab || 0) + Number(a.p_ba || 0)) : a[sortKey];
+        const bv = sortKey === "packets" ? (Number(b.p_ab || 0) + Number(b.p_ba || 0)) : b[sortKey];
         let cmp = 0;
         if (typeof av === "number" && typeof bv === "number") {
           cmp = av === bv ? 0 : (av < bv ? -1 : 1);
@@ -375,8 +375,8 @@
           <td class="col-proto">${r.proto || "-"}</td>
           <td class="col-port" title="${r.dst_port_label || ""}">${r.dst_port ?? "-"}</td>
           ${showHttp ? `<td class="col-http" title="${r.http_endpoint || ""}">${r.http_endpoint || "-"}</td>` : ""}
-          ${showPackets ? `<td class="col-packets">${r.packets_ab}</td>` : ""}
-          ${showPackets ? `<td class="col-packets">${r.packets_ba}</td>` : ""}
+          ${showPackets ? `<td class="col-packets">${r.p_ab}</td>` : ""}
+          ${showPackets ? `<td class="col-packets">${r.p_ba}</td>` : ""}
         </tr>
       `).join("");
       meta.textContent = `${rows.length} flow(s) on this page — total ${totalCount}`;
@@ -513,16 +513,35 @@
         const items = Array.isArray(findings) ? findings : findings.items || [];
         const total = findings.total ?? items.length;
         const rows = items.map(f => {
-          const sInfo = parseEndpointLabel(f.s);
-          const tInfo = parseEndpointLabel(f.t);
-          const dstPort = (f.dst_port && f.dst_port !== 0 ? f.dst_port : "");
+          const sInfo = parseEndpointLabel(f.a);
+          const tInfo = parseEndpointLabel(f.b);
+          // Compute destination port from a_port and b_port based on ephemeral port heuristics
+          const isEphemeral = (p) => p >= 32768;
+          const a_port = f.a_port ?? 0;
+          const b_port = f.b_port ?? 0;
+          let dstPort = "";
+          if (a_port && b_port) {
+            const a_ephem = isEphemeral(a_port);
+            const b_ephem = isEphemeral(b_port);
+            if (a_ephem && !b_ephem) {
+              dstPort = b_port;
+            } else if (b_ephem && !a_ephem) {
+              dstPort = a_port;
+            } else if (!a_ephem && !b_ephem) {
+              dstPort = a_port;
+            } else {
+              dstPort = Math.min(a_port, b_port);
+            }
+          } else {
+            dstPort = a_port || b_port || "";
+          }
           const portNum = dstPort ? Number(dstPort) : 0;
           const httpEndpoint = (f.http_path_ab && (f.http_host_ab ? `${f.http_host_ab}${f.http_path_ab}` : f.http_path_ab))
             || (f.http_path_ba && (f.http_host_ba ? `${f.http_host_ba}${f.http_path_ba}` : f.http_path_ba))
             || "";
           const cleanOwner = (o) => (o || "").replace(/^o:/, "");
-          const srcCombined = sInfo.pod ? `${sInfo.ns ? sInfo.ns + ":" : ""}${sInfo.pod}` : (sInfo.raw || f.s || "");
-          const dstCombined = tInfo.pod ? `${tInfo.ns ? tInfo.ns + ":" : ""}${tInfo.pod}` : (tInfo.raw || f.t || "");
+          const srcCombined = sInfo.pod ? `${sInfo.ns ? sInfo.ns + ":" : ""}${sInfo.pod}` : (sInfo.raw || f.a || "");
+          const dstCombined = tInfo.pod ? `${tInfo.ns ? tInfo.ns + ":" : ""}${tInfo.pod}` : (tInfo.raw || f.b || "");
           return {
             src: srcCombined,
             dst: dstCombined,
@@ -530,8 +549,8 @@
             dst_pod: tInfo.pod || tInfo.raw || "",
             src_ns: sInfo.ns || "",
             dst_ns: tInfo.ns || "",
-            src_owner: cleanOwner(f.o_s),
-            dst_owner: cleanOwner(f.o_t),
+            src_owner: cleanOwner(f.o_a),
+            dst_owner: cleanOwner(f.o_b),
             src_node: sInfo.node || "",
             dst_node: tInfo.node || "",
             proto: f.l7_a || f.l7_b || PROTO_NAMES[f.proto] || f.proto || "",
@@ -539,9 +558,10 @@
             dst_port_label: portLabel(portNum),
             http_endpoint: httpEndpoint,
             http: httpEndpoint,
-            packets_ab: Number(f.packets_ab ?? 0),
-            packets_ba: Number(f.packets_ba ?? 0),
-            packets: Number(f.packets_ab || 0) + Number(f.packets_ba || 0),
+            p_ab: Number(f.p_ab ?? 0),
+            p_ba: Number(f.p_ba ?? 0),
+            packets: Number(f.p_ab || 0) + Number(f.p_ba || 0),
+            i: f.i,
           };
         });
         currentRows = rows;

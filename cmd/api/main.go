@@ -1618,10 +1618,11 @@ func (a *app) handleNetworkTrusts(c *gin.Context) {
 		Ports     []int  `json:"ports"`
 	}
 	type finding struct {
-		S       string `json:"s"`
-		T       string `json:"t"`
+		A       string `json:"a"`
+		B       string `json:"b"`
 		Proto   int    `json:"proto"`
-		DstPort *int   `json:"dst_port"`
+		APort   *int   `json:"a_port"`
+		BPort   *int   `json:"b_port"`
 		Packets int64  `json:"packets_ab"`
 	}
 	// Fetch trusts
@@ -1697,13 +1698,45 @@ func (a *app) handleNetworkTrusts(c *gin.Context) {
 		Trusted bool   `json:"trusted"`
 		Policy  string `json:"policy,omitempty"`
 	}
-	match := func(f finding) (bool, string) {
-		port := 0
-		if f.DstPort != nil {
-			port = *f.DstPort
+	// Compute destination port from a_port and b_port using ephemeral port heuristics
+	getDstPort := func(f finding) int {
+		aPort := 0
+		if f.APort != nil {
+			aPort = *f.APort
 		}
+		bPort := 0
+		if f.BPort != nil {
+			bPort = *f.BPort
+		}
+		isEphemeral := func(p int) bool { return p >= 32768 }
+		aEphem := isEphemeral(aPort)
+		bEphem := isEphemeral(bPort)
+		if aEphem && !bEphem {
+			return bPort
+		} else if bEphem && !aEphem {
+			return aPort
+		} else if !aEphem && !bEphem {
+			if aPort != 0 {
+				return aPort
+			}
+			return bPort
+		} else {
+			if aPort != 0 && bPort != 0 {
+				if aPort < bPort {
+					return aPort
+				}
+				return bPort
+			} else if aPort != 0 {
+				return aPort
+			}
+			return bPort
+		}
+	}
+
+	match := func(f finding) (bool, string) {
+		port := getDstPort(f)
 		for _, t := range trusts {
-			if t.Src == f.S && t.Dst == f.T {
+			if t.Src == f.A && t.Dst == f.B {
 				if len(t.Ports) == 0 {
 					return true, t.Policy
 				}
@@ -1720,13 +1753,10 @@ func (a *app) handleNetworkTrusts(c *gin.Context) {
 	rows := make([]row, 0, len(findWrapper.Items))
 	for _, f := range findWrapper.Items {
 		ok, pol := match(f)
-		port := 0
-		if f.DstPort != nil {
-			port = *f.DstPort
-		}
+		port := getDstPort(f)
 		rows = append(rows, row{
-			Src:     f.S,
-			Dst:     f.T,
+			Src:     f.A,
+			Dst:     f.B,
 			Proto:   f.Proto,
 			DstPort: port,
 			Trusted: ok,
@@ -1934,25 +1964,38 @@ func (a *app) refreshPortScans(ctx context.Context) error {
 	type set map[int]struct{}
 	portsBySrc := make(map[string]set)
 	for _, f := range findings {
-		src, _ := f["s"].(string)
+		src, _ := f["a"].(string)
 		if src == "" {
 			continue
 		}
-		rawPort, ok := f["dst_port"]
-		if !ok {
-			continue
-		}
+		// Compute destination port from a_port and b_port
+		aPort := intFromAny(f["a_port"])
+		bPort := intFromAny(f["b_port"])
+		isEphemeral := func(p int) bool { return p >= 32768 }
 		var port int
-		switch v := rawPort.(type) {
-		case float64:
-			port = int(v)
-		case int:
-			port = v
-		case int64:
-			port = int(v)
-		case string:
-			if p, err := strconv.Atoi(v); err == nil {
-				port = p
+		aEphem := isEphemeral(aPort)
+		bEphem := isEphemeral(bPort)
+		if aEphem && !bEphem {
+			port = bPort
+		} else if bEphem && !aEphem {
+			port = aPort
+		} else if !aEphem && !bEphem {
+			if aPort != 0 {
+				port = aPort
+			} else {
+				port = bPort
+			}
+		} else {
+			if aPort != 0 && bPort != 0 {
+				if aPort < bPort {
+					port = aPort
+				} else {
+					port = bPort
+				}
+			} else if aPort != 0 {
+				port = aPort
+			} else {
+				port = bPort
 			}
 		}
 		if port <= 0 {
@@ -1999,16 +2042,45 @@ func (a *app) refreshBaseline(ctx context.Context) error {
 	tmp := make(map[BaselineKey]*BaselineEntry)
 
 	for _, f := range findings {
-		srcLabel, _ := f["s"].(string)
-		dstLabel, _ := f["t"].(string)
+		srcLabel, _ := f["a"].(string)
+		dstLabel, _ := f["b"].(string)
 		srcParsed := parseEndpointLabelGo(srcLabel)
 		dstParsed := parseEndpointLabelGo(dstLabel)
-		srcKind, srcName := kindNameFromString(fmt.Sprint(f["o_s"]))
-		dstKind, dstName := kindNameFromString(fmt.Sprint(f["o_t"]))
+		srcKind, srcName := kindNameFromString(fmt.Sprint(f["o_a"]))
+		dstKind, dstName := kindNameFromString(fmt.Sprint(f["o_b"]))
 		srcOwner := normalizeOwner(srcKind, srcName)
 		dstOwner := normalizeOwner(dstKind, dstName)
 
-		dstPort := intFromAny(f["dst_port"])
+		// Compute destination port from a_port and b_port
+		aPort := intFromAny(f["a_port"])
+		bPort := intFromAny(f["b_port"])
+		isEphemeral := func(p int) bool { return p >= 32768 }
+		var dstPort int
+		aEphem := isEphemeral(aPort)
+		bEphem := isEphemeral(bPort)
+		if aEphem && !bEphem {
+			dstPort = bPort
+		} else if bEphem && !aEphem {
+			dstPort = aPort
+		} else if !aEphem && !bEphem {
+			if aPort != 0 {
+				dstPort = aPort
+			} else {
+				dstPort = bPort
+			}
+		} else {
+			if aPort != 0 && bPort != 0 {
+				if aPort < bPort {
+					dstPort = aPort
+				} else {
+					dstPort = bPort
+				}
+			} else if aPort != 0 {
+				dstPort = aPort
+			} else {
+				dstPort = bPort
+			}
+		}
 		proto := intFromAny(f["proto"])
 
 		key := BaselineKey{
