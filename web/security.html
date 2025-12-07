@@ -46,6 +46,8 @@
                         <thead>
                             <tr>
                                 <th>Timestamp</th>
+                                <th>Cluster</th>
+                                <th>Pod</th>
                                 <th>Severity</th>
                                 <th>Command</th>
                                 <th>PID/PPID</th>
@@ -144,7 +146,7 @@
             tbody.innerHTML = "";
 
             if (events.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:32px;">No shell execution events detected. This is good! 🎉</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:32px;">No shell execution events detected. This is good! 🎉</td></tr>';
                 return;
             }
 
@@ -158,6 +160,25 @@
                 tdTime.textContent = new Date(event.timestamp).toLocaleString();
                 tdTime.style.fontSize = "0.85rem";
                 tr.appendChild(tdTime);
+
+                // Cluster
+                const tdCluster = document.createElement("td");
+                tdCluster.textContent = event.cluster_name || "-";
+                tdCluster.style.fontSize = "0.85rem";
+                tdCluster.style.color = event.cluster_name ? "var(--text-main)" : "var(--text-muted)";
+                tr.appendChild(tdCluster);
+
+                // Pod
+                const tdPod = document.createElement("td");
+                if (event.pod_name && event.pod_namespace) {
+                    tdPod.textContent = `${event.pod_namespace}:${event.pod_name}`;
+                    tdPod.style.fontFamily = "monospace";
+                    tdPod.style.fontSize = "0.85rem";
+                } else {
+                    tdPod.textContent = "-";
+                    tdPod.style.color = "var(--text-muted)";
+                }
+                tr.appendChild(tdPod);
 
                 // Severity
                 const tdSeverity = document.createElement("td");
@@ -229,6 +250,10 @@
         }
 
         function showDetails(event) {
+            const podInfo = event.pod_name && event.pod_namespace 
+                ? `${event.pod_namespace}:${event.pod_name}` 
+                : "N/A";
+            
             alert(`Shell Execution Details
 
 Command: ${event.comm}
@@ -244,6 +269,7 @@ Remote IP: ${event.remote_ip || "N/A"}
 Remote Port: ${event.remote_port || "N/A"}
 Agent: ${event.agent_id || "N/A"}
 Cluster: ${event.cluster_name || "N/A"}
+Pod: ${podInfo}
 Timestamp: ${new Date(event.timestamp).toLocaleString()}`);
         }
 

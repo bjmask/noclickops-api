@@ -1618,12 +1618,46 @@ func (a *app) handleNetworkTrusts(c *gin.Context) {
 		Ports     []int  `json:"ports"`
 	}
 	type finding struct {
-		A       string `json:"a"`
-		B       string `json:"b"`
-		Proto   int    `json:"proto"`
-		APort   *int   `json:"a_port"`
-		BPort   *int   `json:"b_port"`
-		Packets int64  `json:"packets_ab"`
+		A         string `json:"a"`
+		B         string `json:"b"`
+		Proto     int    `json:"proto"`
+		APort     *int   `json:"a_port"`
+		BPort     *int   `json:"b_port"`
+		Packets   int64  `json:"packets_ab"`
+		PacketsBA int64  `json:"packets_ba"`
+		Initiator *int   `json:"i"`
+	}
+	// Normalize finding so CLIENT (ephemeral port) is always source
+	// This ensures we show: "app:* → service:port" not "service:port → app:*"
+	normalizeFinding := func(f finding) finding {
+		aPort := 0
+		if f.APort != nil {
+			aPort = *f.APort
+		}
+		bPort := 0
+		if f.BPort != nil {
+			bPort = *f.BPort
+		}
+		
+		// Treat 0 (masked/unknown) as ephemeral
+		isServicePort := func(p int) bool { return p > 0 && p < 32768 && p != 65535 }
+		aIsService := isServicePort(aPort)
+		bIsService := isServicePort(bPort)
+		
+		// If A has service port and B doesn't, swap so client (B) is source
+		if aIsService && !bIsService {
+			return finding{
+				A:         f.B,
+				B:         f.A,
+				Proto:     f.Proto,
+				APort:     f.BPort,
+				BPort:     f.APort,
+				Packets:   f.PacketsBA,
+				PacketsBA: f.Packets,
+				Initiator: f.Initiator,
+			}
+		}
+		return f
 	}
 	// Fetch trusts
 	trustURL := strings.Replace(a.trafficMonitorURL, "/findings", "/trusts", 1) + "?" + qs.Encode()
@@ -1699,6 +1733,7 @@ func (a *app) handleNetworkTrusts(c *gin.Context) {
 		Policy  string `json:"policy,omitempty"`
 	}
 	// Compute destination port from a_port and b_port using ephemeral port heuristics
+	// 65535 is the ephemeral marker from Rust backend
 	getDstPort := func(f finding) int {
 		aPort := 0
 		if f.APort != nil {
@@ -1708,9 +1743,10 @@ func (a *app) handleNetworkTrusts(c *gin.Context) {
 		if f.BPort != nil {
 			bPort = *f.BPort
 		}
-		isEphemeral := func(p int) bool { return p >= 32768 }
+		isEphemeral := func(p int) bool { return p >= 32768 || p == 65535 }
 		aEphem := isEphemeral(aPort)
 		bEphem := isEphemeral(bPort)
+		// Return the non-ephemeral port (the service port)
 		if aEphem && !bEphem {
 			return bPort
 		} else if bEphem && !aEphem {
@@ -1721,15 +1757,22 @@ func (a *app) handleNetworkTrusts(c *gin.Context) {
 			}
 			return bPort
 		} else {
-			if aPort != 0 && bPort != 0 {
-				if aPort < bPort {
+			// Both ephemeral or unknown - return lower non-65535 value
+			if aPort != 65535 && bPort != 65535 {
+				if aPort != 0 && bPort != 0 {
+					if aPort < bPort {
+						return aPort
+					}
+					return bPort
+				} else if aPort != 0 {
 					return aPort
 				}
-				return bPort
-			} else if aPort != 0 {
+			} else if aPort != 65535 && aPort != 0 {
 				return aPort
+			} else if bPort != 65535 && bPort != 0 {
+				return bPort
 			}
-			return bPort
+			return 0
 		}
 	}
 
@@ -1752,6 +1795,8 @@ func (a *app) handleNetworkTrusts(c *gin.Context) {
 
 	rows := make([]row, 0, len(findWrapper.Items))
 	for _, f := range findWrapper.Items {
+		// Normalize so initiator is always source
+		f = normalizeFinding(f)
 		ok, pol := match(f)
 		port := getDstPort(f)
 		rows = append(rows, row{
@@ -1964,41 +2009,52 @@ func (a *app) refreshPortScans(ctx context.Context) error {
 	type set map[int]struct{}
 	portsBySrc := make(map[string]set)
 	for _, f := range findings {
-		src, _ := f["a"].(string)
+		// Normalize: if A has service port and B has ephemeral, swap so client (B) is source
+		aPort := intFromAny(f["a_port"])
+		bPort := intFromAny(f["b_port"])
+		isEphemeral := func(p int) bool { return p >= 32768 || p == 65535 }
+		aEphem := isEphemeral(aPort)
+		bEphem := isEphemeral(bPort)
+		
+		var src string
+		var servicePort, clientPort int
+		
+		if !aEphem && bEphem {
+			// A is server, B is client - swap so client is source
+			src, _ = f["b"].(string)
+			servicePort = aPort
+			clientPort = bPort
+		} else {
+			// A is client or both/neither ephemeral - keep as-is
+			src, _ = f["a"].(string)
+			servicePort = bPort
+			clientPort = aPort
+		}
+		
 		if src == "" {
 			continue
 		}
-		// Compute destination port from a_port and b_port
-		aPort := intFromAny(f["a_port"])
-		bPort := intFromAny(f["b_port"])
-		isEphemeral := func(p int) bool { return p >= 32768 }
+		
+		// Use service port for aggregation
 		var port int
-		aEphem := isEphemeral(aPort)
-		bEphem := isEphemeral(bPort)
-		if aEphem && !bEphem {
-			port = bPort
-		} else if bEphem && !aEphem {
-			port = aPort
-		} else if !aEphem && !bEphem {
-			if aPort != 0 {
-				port = aPort
-			} else {
-				port = bPort
-			}
+		if !isEphemeral(servicePort) && servicePort != 0 {
+			port = servicePort
+		} else if !isEphemeral(clientPort) && clientPort != 0 {
+			port = clientPort
 		} else {
-			if aPort != 0 && bPort != 0 {
-				if aPort < bPort {
-					port = aPort
-				} else {
+			// Both ephemeral or unknown
+			if aPort != 65535 && bPort != 65535 && aPort != 0 && bPort != 0 {
+				port = aPort
+				if bPort < aPort && bPort != 0 {
 					port = bPort
 				}
-			} else if aPort != 0 {
+			} else if aPort != 65535 && aPort != 0 {
 				port = aPort
-			} else {
+			} else if bPort != 65535 && bPort != 0 {
 				port = bPort
 			}
 		}
-		if port <= 0 {
+		if port <= 0 || port == 65535 {
 			continue
 		}
 		if _, ok := portsBySrc[src]; !ok {
@@ -2042,42 +2098,57 @@ func (a *app) refreshBaseline(ctx context.Context) error {
 	tmp := make(map[BaselineKey]*BaselineEntry)
 
 	for _, f := range findings {
-		srcLabel, _ := f["a"].(string)
-		dstLabel, _ := f["b"].(string)
+		// Normalize: if A has service port and B has ephemeral, swap so client is source
+		aPort := intFromAny(f["a_port"])
+		bPort := intFromAny(f["b_port"])
+		isEphemeral := func(p int) bool { return p >= 32768 || p == 65535 }
+		aEphem := isEphemeral(aPort)
+		bEphem := isEphemeral(bPort)
+		
+		var srcLabel, dstLabel, srcOwnerKey, dstOwnerKey string
+		var servicePort, clientPort int
+		
+		if !aEphem && bEphem {
+			// A is server, B is client - swap
+			srcLabel, _ = f["b"].(string)
+			dstLabel, _ = f["a"].(string)
+			srcOwnerKey = "o_b"
+			dstOwnerKey = "o_a"
+			servicePort = aPort
+			clientPort = bPort
+		} else {
+			// A is client or both/neither ephemeral
+			srcLabel, _ = f["a"].(string)
+			dstLabel, _ = f["b"].(string)
+			srcOwnerKey = "o_a"
+			dstOwnerKey = "o_b"
+			servicePort = bPort
+			clientPort = aPort
+		}
+		
 		srcParsed := parseEndpointLabelGo(srcLabel)
 		dstParsed := parseEndpointLabelGo(dstLabel)
-		srcKind, srcName := kindNameFromString(fmt.Sprint(f["o_a"]))
-		dstKind, dstName := kindNameFromString(fmt.Sprint(f["o_b"]))
+		srcKind, srcName := kindNameFromString(fmt.Sprint(f[srcOwnerKey]))
+		dstKind, dstName := kindNameFromString(fmt.Sprint(f[dstOwnerKey]))
 		srcOwner := normalizeOwner(srcKind, srcName)
 		dstOwner := normalizeOwner(dstKind, dstName)
 
-		// Compute destination port from a_port and b_port
-		aPort := intFromAny(f["a_port"])
-		bPort := intFromAny(f["b_port"])
-		isEphemeral := func(p int) bool { return p >= 32768 }
+		// Compute destination port - prefer non-ephemeral (service) port
 		var dstPort int
-		aEphem := isEphemeral(aPort)
-		bEphem := isEphemeral(bPort)
-		if aEphem && !bEphem {
-			dstPort = bPort
-		} else if bEphem && !aEphem {
-			dstPort = aPort
-		} else if !aEphem && !bEphem {
-			if aPort != 0 {
-				dstPort = aPort
-			} else {
-				dstPort = bPort
-			}
+		if !isEphemeral(servicePort) && servicePort != 0 {
+			dstPort = servicePort
+		} else if !isEphemeral(clientPort) && clientPort != 0 {
+			dstPort = clientPort
 		} else {
-			if aPort != 0 && bPort != 0 {
-				if aPort < bPort {
-					dstPort = aPort
-				} else {
+			// Both ephemeral or unknown
+			if aPort != 65535 && bPort != 65535 && aPort != 0 && bPort != 0 {
+				dstPort = aPort
+				if bPort < aPort && bPort != 0 {
 					dstPort = bPort
 				}
-			} else if aPort != 0 {
+			} else if aPort != 65535 && aPort != 0 {
 				dstPort = aPort
-			} else {
+			} else if bPort != 65535 && bPort != 0 {
 				dstPort = bPort
 			}
 		}

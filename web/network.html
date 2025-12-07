@@ -515,27 +515,38 @@
         const rows = items.map(f => {
           const sInfo = parseEndpointLabel(f.a);
           const tInfo = parseEndpointLabel(f.b);
-          // Compute destination port from a_port and b_port based on ephemeral port heuristics
-          const isEphemeral = (p) => p >= 32768;
+          // Compute destination port from a_port and b_port based on traffic direction
+          // 65535 is the ephemeral marker
           const a_port = f.a_port ?? 0;
           const b_port = f.b_port ?? 0;
+          const p_ab = f.p_ab ?? 0;
+          const p_ba = f.p_ba ?? 0;
+          
           let dstPort = "";
-          if (a_port && b_port) {
+          // Determine which side is receiving traffic
+          if (p_ab > p_ba) {
+            // Traffic is A→B, so B is destination
+            dstPort = b_port === 65535 ? "Ephemeral" : (b_port || "");
+          } else if (p_ba > p_ab) {
+            // Traffic is B→A, so A is destination  
+            dstPort = a_port === 65535 ? "Ephemeral" : (a_port || "");
+          } else {
+            // Equal or both zero - use service port heuristic
+            const isEphemeral = (p) => p >= 32768 || p === 65535;
             const a_ephem = isEphemeral(a_port);
             const b_ephem = isEphemeral(b_port);
             if (a_ephem && !b_ephem) {
-              dstPort = b_port;
+              dstPort = b_port === 65535 ? "Ephemeral" : b_port;
             } else if (b_ephem && !a_ephem) {
-              dstPort = a_port;
-            } else if (!a_ephem && !b_ephem) {
-              dstPort = a_port;
+              dstPort = a_port === 65535 ? "Ephemeral" : a_port;
+            } else if (a_port && b_port) {
+              // Both ephemeral or both service - pick one
+              dstPort = b_port === 65535 ? "Ephemeral" : (b_port || a_port);
             } else {
-              dstPort = Math.min(a_port, b_port);
+              dstPort = (a_port || b_port) === 65535 ? "Ephemeral" : (a_port || b_port || "");
             }
-          } else {
-            dstPort = a_port || b_port || "";
           }
-          const portNum = dstPort ? Number(dstPort) : 0;
+          const portNum = (typeof dstPort === 'number') ? dstPort : 0;
           const httpEndpoint = (f.http_path_ab && (f.http_host_ab ? `${f.http_host_ab}${f.http_path_ab}` : f.http_path_ab))
             || (f.http_path_ba && (f.http_host_ba ? `${f.http_host_ba}${f.http_path_ba}` : f.http_path_ba))
             || "";

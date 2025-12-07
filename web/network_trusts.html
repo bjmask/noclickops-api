@@ -149,7 +149,7 @@
           <td style="padding:10px;">${r.src}</td>
           <td style="padding:10px;">${r.dst}</td>
           <td style="padding:10px;">${r.proto || ""}</td>
-          <td style="padding:10px;">${r.dst_port || ""}</td>
+          <td style="padding:10px;">${r.dst_port === 65535 ? 'Ephemeral' : (r.dst_port || "")}</td>
           <td style="padding:10px;">${r.policy || "-"}</td>
           <td style="padding:10px;"><span class="trust-dot ${r.trusted ? "trust-ok" : "trust-miss"}" title="${r.trusted ? "Trusted by policy" : "No matching policy"}"></span></td>
         `;
