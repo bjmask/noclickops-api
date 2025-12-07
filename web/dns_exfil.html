@@ -35,6 +35,8 @@
             <thead>
               <tr>
                 <th data-sort="query" data-filter="query"><div class="th-wrap"><span>Query</span><div class="th-actions"><span class="sort-icon">↕</span><span class="filter-icon">⌃</span></div></div></th>
+                <th data-sort="cluster_name" data-filter="cluster_name"><div class="th-wrap"><span>Cluster</span><div class="th-actions"><span class="sort-icon">↕</span><span class="filter-icon">⌃</span></div></div></th>
+                <th data-sort="agents" data-filter="agents"><div class="th-wrap"><span>Pods</span><div class="th-actions"><span class="sort-icon">↕</span><span class="filter-icon">⌃</span></div></div></th>
                 <th data-sort="count" data-filter="count"><div class="th-wrap"><span>Count</span><div class="th-actions"><span class="sort-icon">↕</span><span class="filter-icon">⌃</span></div></div></th>
                 <th data-sort="entropy" data-filter="entropy"><div class="th-wrap"><span>Entropy</span><div class="th-actions"><span class="sort-icon">↕</span><span class="filter-icon">⌃</span></div></div></th>
                 <th data-sort="flagged" data-filter="flagged"><div class="th-wrap"><span>Status</span><div class="th-actions"><span class="sort-icon">↕</span><span class="filter-icon">⌃</span></div></div></th>
@@ -59,6 +61,8 @@
     
     const FILTER_FIELDS = [
       { key: "query", label: "Query" },
+      { key: "cluster_name", label: "Cluster" },
+      { key: "agents", label: "Pods" },
       { key: "count", label: "Count" },
       { key: "entropy", label: "Entropy" },
       { key: "flagged", label: "Status" },
@@ -102,6 +106,14 @@
 
     function formatFieldValue(row, key) {
       if (key === "query") return row.query || "";
+      if (key === "cluster_name") return row.cluster_name || "N/A";
+      if (key === "agents") {
+        if (row.pod_name && row.pod_namespace) {
+          return `${row.pod_namespace}:${row.pod_name}`;
+        }
+        if (row.pod_name) return row.pod_name;
+        return (row.agents && row.agents.length > 0) ? row.agents.join(", ") : "N/A";
+      }
       if (key === "count") return row.count ? String(row.count) : "0";
       if (key === "entropy") return row.entropy ? row.entropy.toFixed(4) : "0.0000";
       if (key === "flagged") return row.flagged ? "⚠️ High Entropy" : "Normal";
@@ -127,9 +139,14 @@
       sorted.sort((a, b) => {
         let aVal = a[sortKey];
         let bVal = b[sortKey];
-        if (sortKey === "query") {
+        if (sortKey === "query" || sortKey === "cluster_name") {
           aVal = (aVal || "").toLowerCase();
           bVal = (bVal || "").toLowerCase();
+          return sortDir * aVal.localeCompare(bVal);
+        }
+        if (sortKey === "agents") {
+          aVal = (a.agents && a.agents.length > 0) ? a.agents.join(", ").toLowerCase() : "";
+          bVal = (b.agents && b.agents.length > 0) ? b.agents.join(", ").toLowerCase() : "";
           return sortDir * aVal.localeCompare(bVal);
         }
         if (sortKey === "flagged") {
@@ -151,7 +168,7 @@
       
       tbody.innerHTML = "";
       if (filtered.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">No DNS queries found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No DNS queries found</td></tr>';
         return;
       }
       
@@ -167,6 +184,28 @@
         tdQuery.style.fontFamily = "monospace";
         tdQuery.style.wordBreak = "break-all";
         tr.appendChild(tdQuery);
+        
+        const tdCluster = document.createElement("td");
+        tdCluster.textContent = row.cluster_name || "N/A";
+        tr.appendChild(tdCluster);
+        
+        const tdPods = document.createElement("td");
+        if (row.pod_name && row.pod_namespace) {
+          tdPods.textContent = `${row.pod_namespace}:${row.pod_name}`;
+          tdPods.style.fontFamily = "monospace";
+          tdPods.style.fontSize = "0.9em";
+        } else if (row.pod_name) {
+          tdPods.textContent = row.pod_name;
+          tdPods.style.fontFamily = "monospace";
+          tdPods.style.fontSize = "0.9em";
+        } else if (row.agents && row.agents.length > 0) {
+          tdPods.textContent = row.agents.join(", ");
+          tdPods.style.fontFamily = "monospace";
+          tdPods.style.fontSize = "0.9em";
+        } else {
+          tdPods.textContent = "N/A";
+        }
+        tr.appendChild(tdPods);
         
         const tdCount = document.createElement("td");
         tdCount.textContent = row.count || 0;

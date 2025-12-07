@@ -239,6 +239,7 @@
     let columnOptions = [
       { key: "src", label: "Source" },
       { key: "dst", label: "Destination" },
+      { key: "cluster", label: "Cluster" },
       { key: "src_pod", label: "Source Pod" },
       { key: "dst_pod", label: "Destination Pod" },
       { key: "src_ns", label: "Source Namespace" },
@@ -255,6 +256,7 @@
     const FILTER_FIELDS = [
       { key: "src", label: "Source" },
       { key: "dst", label: "Destination" },
+      { key: "cluster", label: "Cluster" },
       { key: "src_pod", label: "Source Pod" },
       { key: "dst_pod", label: "Destination Pod" },
       { key: "src_ns", label: "Source Namespace" },
@@ -556,6 +558,7 @@
           return {
             src: srcCombined,
             dst: dstCombined,
+            cluster: f.cluster || "",
             src_pod: sInfo.pod || sInfo.raw || "",
             dst_pod: tInfo.pod || tInfo.raw || "",
             src_ns: sInfo.ns || "",
